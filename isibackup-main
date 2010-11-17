@@ -1,0 +1,2678 @@
+#!/usr/bin/ruby
+# Copyright (C) 1999-2009  IMSEC GmbH
+# Copyright (C) 2004-2009  Logintas AG
+#
+# This file is part of ISiBackup.
+#
+#    ISiBackup is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    ISiBackup is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License along
+#    with this program; if not, write to the Free Software Foundation, Inc.,
+#    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
+# TODO: Check that there are no unwanted TODOs
+
+
+##TODO## COPYRIGHT="\
+##TODO## Copyright (C) 1999-2007  IMSEC GmbH
+##TODO## Copyright (C) 2004-2007  Logintas AG"
+##TODO## LIABILITY="This program comes with NO WARRANTY, to the extent permitted by law."
+##TODO## AUTHORS="Written by Marcus Holthaus, Simon Huerlimann and Adrian Friedli."
+##TODO## 
+##TODO## def escape_field
+##TODO##     raise "Not rewritten yet!"
+##TODO##     # escape backslashes, quotes and newlines, do quotes around fields if necessary
+##TODO##     sed -e ':a;$bb;N;ba;:b;s/\\/\\\\/g;s/\"/\\\"/g;s/\n/\\n/g;/[,;\\]/s/^.*$/\"&\"/'
+##TODO## end
+##TODO## 
+
+
+# Load libraries
+require "yaml"
+
+$LOAD_PATH.insert(0,File.dirname(__FILE__) + "/lib/")
+require 'libisi'
+init_libisi(:log_levels => [:CONFIG, :DEBUG, :INFO, :SKIPPED, :WARN, :ERROR, :FATAL])
+ENV["PROGRAM_VERSION"] = "##DEVELOPMENT##"
+require "path_list.rb"
+require "backup.rb"
+
+# DEPRECATED ENV["DIRLIST_ENTRY"] = "###isibackup-dirlist###"
+ENV["lFileListFName"] = "#{ENV["HOST"]}.#{ENV["NET"]}.#{ENV["PROGRAM_IDENT"]}.filelist.#{Process.pid}"
+ENV["lDirListFName"] = "#{ENV["HOST"]}.#{ENV["NET"]}.#{ENV["PROGRAM_IDENT"]}.dirlist.#{Process.pid}"
+ENV["lDiffRefFName"] = "#{ENV["HOST"]}.#{ENV["NET"]}.#{ENV["PROGRAM_IDENT"]}.diffref.#{Process.pid}"
+
+def check_config
+  raise "No hostname found." unless Backup.get_config("HOST")
+  raise "No netname found." unless Backup.get_config("NET")
+
+  raise "Set --host when doing rsync with option --delete!" if 
+    Backup.get_config("OPT_RSYNC_ADD_OPTIONS","").include?("--del") and
+    (Backup.get_config("OPT_HOST").nil? or Backup.get_config("OPT_HOST") == "*")
+  
+  raise "Set --net when doing rsync with option --delete!" if 
+    Backup.get_config("OPT_RSYNC_ADD_OPTIONS","").include?("--del") and
+    (Backup.get_config("OPT_NET").nil? or Backup.get_config("OPT_NET") == "*")
+
+  $max_collect_size = Backup.get_config("MAX_COLLECT_SIZE","0")
+  raise "MAX_COLLECT_SIZE not defined!" if $max_collect_size.nil? or $max_collect_size == ""
+  $max_collect_size = $max_collect_size.to_i
+
+  $group_steps = [GROUP_SMALLEST]
+  while (next_step = ($group_steps[-1] * GROUP_STEP_MUL)) 
+    $group_steps.push(next_step)
+    break if (next_step * GROUP_BASE_SIZE) > $max_collect_size
+  end
+  $group_counts = $group_steps.map {|s| group_count_function(s) }
+
+
+  raise "FILE_NAME_ESCAPE_PATTERN not found." unless Backup.get_config("FILE_NAME_ESCAPE_PATTERN")
+  $file_name_escape_pattern = Regexp.new(Backup.get_config("FILE_NAME_ESCAPE_PATTERN"))
+
+  raise "MAX_FSFILESIZE option not given" unless Backup.get_config("MAX_FSFILESIZE")
+  $max_fs_file_size = (Backup.get_config("MAX_FSFILESIZE").to_i * 1024)
+  
+  $max_single_collect_count = Backup.get_config("MAX_SINGLE_COLLECT_COUNT","1000").to_i
+
+  if $action == :collect or $action == :copy
+    unless Backup.get_config("NO_RSYNC_LOGIN_FOR_TEST") == "true"
+      raise "Remote user not specified." unless Backup.get_config("OPT_REMOTE_USER")
+      raise "Remote host not specified." unless Backup.get_config("OPT_REMOTE_HOST")
+    end
+  else
+    raise "Mode not specified." unless Backup.get_config("OPT_MODE")
+  end
+
+  # check if mount points are plausible
+  mount_points = open("/proc/mounts") {|f| f.readlines}
+  mount_points = mount_points.map {|mp| mp.split(" ")[2]}.select {|mp| mp =~ /^\/dev\// }
+  regexps = "#{Backup.get_config("ISIBACKUP_CONFIGDIR")}/mount_points"
+  regexps = regexps.map {|r| Regexp.new(r.strip)}
+  mount_points = mount_points.reject {|mp| regexps.select {|r| mp =~ r}.length > 0 }
+
+  if mount_points.length > 0
+    $log.error{"Unusual mount points detected! Will probably not be in backup."}
+    mount_points.each {|mp| $log.error {mp} }
+    
+    mount_points.each {|mp|
+      Backup.set_config("OPT_EXCLUDE_DIRS",Backup.get_config("OPT_EXCLUDE_DIRS") + "^#{Regexp.escape(mp)}\n")
+    }
+  end
+end
+
+def load_defaults_postconf 
+  Backup.set_config("PATH_STATE",bash_eval(Backup.get_config("DEFAULT_PATH_STATE")))
+  # keys given on the command line are preferred, additionaly assure backwards compatibility
+  Backup.set_config("CRYPT_KEYS", Backup.get_config("CRYPT_KEYS_cmdln",Backup.get_config("CRYPT_KEYS",Backup.get_config("CRYPT_KEY"))))
+
+  # for backwards compatibility
+  Backup.set_config("OPT_PACKMETHOD",Backup.get_config("OPT_PACKMETHOD",Backup.get_config("CMD_PACK")))
+
+  # one key each line
+  Backup.set_config("CRYPT_KEYS",bash_eval("$(echo \"$CRYPT_KEYS\" | sed -e 's/\s*;\s*/\n/g')"))
+
+  Backup.set_config("IDENT_USER_SET", (!Backup.get_config("IDENT_USER_BACKUP").nil?).to_s)
+  Backup.set_config("IDENT_GROUP_SET", (!Backup.get_config("IDENT_GROUP_BACKUP").nil?).to_s)
+  Backup.set_config("DIR_PERMS_SET", (!Backup.get_config("DIR_PERMS").nil?).to_s)
+  Backup.set_config("FILE_PERMS_SET", (!Backup.get_config("FILE_PERMS").nil?).to_s)
+  
+  if $action == :collect or $action == :copy
+    Backup.set_config("USER_BACKUP_HOME",bash_eval("$(eval echo ~$IDENT_USER_BACKUP)"))
+    Backup.set_config("OPT_MODE",nil)
+    Backup.set_config("OPT_PACKMETHOD",nil)
+    Backup.set_config("CMD_CRYPT",nil)
+  end
+end
+
+def load_set_config 
+  return if Backup.get_config("OPT_SET").nil? and $action != :backup
+    
+  raise "OPT_SET not set." unless Backup.get_config("OPT_SET")
+  # Prepend ISIBACKUP_CONFIGDIR if OPT_SET is relative path
+  if Backup.get_config("OPT_SET") =~ /^media\-(.*)$/    
+    Backup.set_config("PATH_SET",make_absolute("media",Backup.get_config("ISIBACKUP_CONFIGDIR")))
+    Backup.set_config("MEDIA_NAME",$1)
+    Backup.set_config("SET_CONFIG","#{Backup.get_config("PATH_SET")}/set.conf")
+  else    
+    Backup.set_config("PATH_SET",make_absolute(Backup.get_config("OPT_SET"),Backup.get_config("ISIBACKUP_CONFIGDIR")))
+    Backup.set_config("SET_CONFIG","#{Backup.get_config("PATH_SET")}/set.conf")
+  end  
+
+  # Source config, abort if config file cannot be sourced
+  $log.info{"Reading set configuration '#{Backup.get_config("SET_CONFIG")}"}
+  
+  source(Backup.get_config("SET_CONFIG"))
+end
+
+def append_and_strip_config(name,file)
+  val = Backup.get_config(name,"")
+  if File.readable?(file)
+    val += "\n" unless val == ""
+    val += open(file,"r") {|f| f.readlines.join}
+  end
+  
+  vals = val.split("\n")
+  vals = vals.reject {|line|
+    line =~ /^\s*\#|^\s*$/
+  }
+  vals = vals.uniq.sort
+  val = vals.join("\n")
+  Backup.set_config(name,val)
+end
+
+
+def load_set_lists   
+
+  lIncludeDirs  = "#{Backup.get_config("PATH_SET")}/include_dirs.lst"
+  lIncludeFiles = "#{Backup.get_config("PATH_SET")}/include_files.lst"
+  lExcludeDirs  = "#{Backup.get_config("PATH_SET")}/exclude_dirs.lst"
+  lExcludeFiles = "#{Backup.get_config("PATH_SET")}/exclude_files.lst"
+  lSeparateDirs = "#{Backup.get_config("PATH_SET")}/separate_dirs.lst"
+
+  # Set lIncludeDirs according to OPT_INCLUDE_DIRS_MODE
+  if Backup.get_config("OPT_INCLUDE_DIRS_MODE") == "fstab" and Process.uid != 0
+    $log.warn{"Inclusion mode 'fstab' is only possible when running as root."}
+    $log.warn{"Fall back to inclusion mode 'mount'."}
+    Backup.set_config("OPT_INCLUDE_DIRS_MODE","mount")
+  end
+
+  case Backup.get_config("OPT_INCLUDE_DIRS_MODE")
+  when "mount"
+    mount = open("|mount") {|f| f.readlines}
+    raise "Unable to execute command 'mount'." unless $?.success?
+
+    dirs = []
+    for drive in mount
+      drive = drive.gsub(/[\t ]+/," ").split(" ")
+      res = drive[0]
+      tgt = drive[2]
+
+      raise "Error while splitting mount." if res.nil? or tgt.nil?
+
+      # just backup local devices, that is, everything that was and currently is mounted from /dev
+      if res =~ /^\/dev\// 
+	dirs.push(tgt)
+      end
+    end
+    if !dirs.include?("/")
+      $log.warn("Root directory not included in mounts. Manually add this.")
+      dirs.push("/")
+    end
+    Backup.set_config("OPT_INCLUDE_DIRS",Backup.get_config("OPT_INCLUDE_DIRS","") + dirs.join("\n") + "\n")
+    
+  when "fstab"
+    raise "This does not really work. This is a TODO if needed."
+    # OLD CODE FROM V 1.8
+    ##TODO##         IFS_SAV="$IFS"; IFS=$'\n'
+    ##TODO##         while read drv; do
+    ##TODO##             drv="$(makeSplittable "$drv")"
+    ##TODO## 
+    ##TODO##             res=$(echo "$drv" | cut -f 1 -d " ")
+    ##TODO##             tgt=$(echo "$drv" | cut -f 2 -d " ")
+    ##TODO## 
+    ##TODO##             # just backup local devices, that is, everything that can be mounted from /dev (whatever that may be)
+    ##TODO##             if [ -n "$(echo "$res" | grep "^\(/dev/\|UUID=\|LABEL=\)")" -a -n "$(echo "$tgt" | grep -v "none" )" ] ; then
+    ##TODO##                 OPT_INCLUDE_DIRS=$OPT_INCLUDE_DIRS$tgt$'\n'
+    ##TODO##             fi
+    ##TODO##         done < "/etc/fstab"
+    ##TODO##         IFS="$IFS_SAV"
+  when nil
+    Backup.set_config("OPT_FILESYSTEMS","false")
+    raise "No dirs to backup. Need file '#{Backup.get_config("lIncludeDirs")}'" unless File.readable?(lIncludeDirs)
+    append_and_strip_config("OPT_INCLUDE_DIRS", lIncludeDirs)
+  else
+    raise "Unexpected OPT_INCLUDE_DIRS_MODE #{Backup.get_config("OPT_INCLUDE_DIRS_MODE")}"
+  end
+  
+  append_and_strip_config("OPT_EXCLUDE_DIRS",  lExcludeDirs)
+  append_and_strip_config("OPT_INCLUDE_FILES", lIncludeFiles)
+  append_and_strip_config("OPT_EXCLUDE_FILES", lExcludeFiles )
+  append_and_strip_config("OPT_SEPARATE_DIRS", lSeparateDirs )
+
+end
+
+def log_skipped(path,reason)
+  $log.skipped("#{path.to_s}: #{reason}")
+end
+
+def logfile(ending)
+  raise "Ending may not be nil" if ending.nil?
+  ret = target_file("isibackup/#{Backup.get_config("STARTDATETIME").gsub(":",".")}")
+  if ending == /\./
+    ret + "-" + ending.to_s
+  else
+    ret + "." + ending.to_s
+  end
+end
+
+def init_backup_log 
+  skipfilename = "#{Backup.get_config("lTargetDir")}/isibackup/skipped.log"
+  raise "STARTDATETIME not set." unless Backup.get_config("STARTDATETIME")
+  new_logger("skiplog", skipfilename, :only => :skipped, :pattern => "%d: %m")   
+  new_logger("archivlog", logfile("log"), :level => :info)
+  new_logger("errorlog", logfile("error.log"), :level => :error)
+  new_logger("debuglog", logfile("debug.log"), :level => :debug) if $write_debuglog
+  new_logger("skiplog", logfile("skipped.log"), :only => :skipped, :pattern => "%d: %m")
+  begin
+    if Pathname.new("/var/log/isibackup").writable?
+      new_logger("systemlog", "/var/log/isibackup/isibackup.log", :level => :info)
+      new_logger("systemerr", "/var/log/isibackup/isibackup-error.log", :level => :warn)
+    end
+  rescue
+    $log.warn("#{$!}")
+  end
+end
+
+def init_program 
+  $log.debug{"Initialize program."}
+  # Load defaults
+  Backup.load_defaults
+
+  # load configuration from file
+  Backup.load_config
+
+  # load configuration for the set
+  load_set_config
+
+  # Check the configuration options
+  check_config
+  
+  #load the rest of the defaults
+  load_defaults_postconf
+
+  # set trap for normal exit, kill and ctrl-c
+  $log.debug{"Adding EXIT trap."}
+  Signal.trap("EXIT") { program_exited }
+  $log.debug{"Adding INT trap."}
+  Signal.trap("INT") { interrupt_program}
+end
+
+def program_exited 
+  # remove the trap to prevent recursion
+  $log.debug{"------- Removing EXIT trap."}
+  Signal.trap("EXIT","DEFAULT") # release_lock_and_exit_with_error EXIT
+
+  begin
+    setNewStamp("aborted_by_error")
+  rescue
+    $log.error{"Could not write stamp: #{$!}"}
+  end
+end
+
+def interrupt_program 
+  $log.error{"------- Aborted backup by user interrupt."}
+  setNewStamp("aborted_by_user")
+  $log.debug("Exiting")
+  exit 1
+end
+
+def cleanup_program 
+  $log.debug{"Cleaning up..."}
+
+  #TODO cleanup name convention of temporary files
+  FileUtils.rm_f("#{Backup.get_config("lFileDirs")}.full")
+  FileUtils.rm_f("#{Backup.get_config("lFileDirs")}.filtered")
+  FileUtils.rm_f("#{Backup.get_config("lFileDirs")}.skipped")
+  FileUtils.rm_f("#{Backup.get_config("lFileDirs")}.full.sorted")
+  FileUtils.rm_f("#{Backup.get_config("lFileListTmpFName")}.outputcount")
+  FileUtils.rm_f("#{Backup.get_config("lFileListTmpFName")}.outputsize")
+  FileUtils.rm_f("#{Backup.get_config("lFileListTmpFName")}.dirsize")
+  FileUtils.rm_f("#{Backup.get_config("lFileListTmpFName")}.filecount")
+  FileUtils.rm_f("#{Backup.get_config("lFileListTmpFName")}.tmp")
+  FileUtils.rm_f("#{Backup.get_config("lFileListTmpFName")}.tmp2")
+
+  release_lock
+
+  # remove the exit trap
+  Signal.trap("EXIT","DEFAULT")
+end
+
+def release_lock 
+  if !File.exist?(Backup.get_config("LOCK_FILE"))
+    $log.debug("Not releasing lock file, Lock file does not exist.")
+    return
+  end
+  if $waiting_for_lock
+    $log.debug("Not releasing lock file, was waiting for it.")
+    return
+  end
+  
+  $log.debug{"Release Lock '#{Backup.get_config("LOCK_FILE")}'."}
+  File.delete(Backup.get_config("LOCK_FILE"))
+rescue
+  $log.error{"Could not release lock: #{$!}"}
+end
+
+def setOldStamp
+  makedir_perms(Backup.get_config("PATH_STATE"))
+
+  lLegacyStampFileOld=Pathname.new("#{Backup.get_config("PATH_STATE")}/#{Backup.get_config("HOST")}-#{Backup.get_config("OPT_SET")}#{Backup.get_config("OPT_MODE")}backup.date")
+  lStampFileOld = Pathname.new(bash_eval("$DEFAULT_OLDSTAMP_FILE"))
+  
+  # create symlinks for the old filename (backwards compatibility) TODO: remove after transition is done
+  if lLegacyStampFileOld.exist? and ! lLegacyStampFileOld.symlink?
+    FileUtils.mv(lLegacyStampFileOld.to_s,lStampFileOld.to_s)
+  end
+  if !lLegacyStampFileOld.symlink?
+    lLegacyStampFileOld.make_symlink(lStampFileOld.basename.to_s)
+  end
+
+  if lStampFileOld.exist?
+    change_perms(lStampFileOld.to_s)
+    #rename the stampfile to .date.rotated if its not from today
+    if Backup.get_config("OPT_MODE") == "incr" and lStampFileOld.read(10) != Backup.get_config("START_TIME")[0..9]
+      FileUtils.mv(lStampFileOld.to_s, "#{lStampFileOld.to_s}.rotated")
+    end
+  end
+
+  lStampFileOld.open("w") {|f| f.write(Backup.get_config("START_TIME"))}
+
+  change_perms(lStampFileOld.to_s)
+end
+
+def setNewStamp(result)  
+  result = "#{$exit_mode}#{result}"
+  raise "PATH_STATE not set" unless Backup.get_config("PATH_STATE")
+  makedir_perms(Backup.get_config("PATH_STATE"))
+  Backup.set_config("lStampFileNew","#{Backup.get_config("PATH_STATE")}/#{Backup.get_config("HOST")}.#{Backup.get_config("NET")}.log")
+
+  new_file = Backup.get_config("lStampFileNew") + ".new"
+  
+  if File.exist?(Backup.get_config("lStampFileNew"))
+    FileUtils.cp(Backup.get_config("lStampFileNew"), new_file)
+    change_perms new_file    
+  end
+  
+  fields = [
+    Backup.get_config("START_TIME"),        #  0
+    Backup.get_config("FINISH_TIME"),       #  1
+    $action.to_s.upcase,             #  2
+    Backup.get_config("OPT_SET"),           #  3
+    Backup.get_config("OPT_MODE"),          #  4
+    Backup.get_config("OPT_PACKMETHOD"),    #  5
+    Backup.get_config("CMD_CRYPT").inspect, #  6
+    Backup.get_config("lTotalDirsFound"),   #  7
+    Backup.get_config("lTotalInputCount"),  #  8
+    Backup.get_config("lTotalInputSize"),   #  9
+    Backup.get_config("lTotalOutputCount"), # 10
+    Backup.get_config("lTotalOutputSize"),  # 11
+    Backup.get_config("PROGRAM_VERSION"),   # 12
+    Backup.get_config("HOST"),              # 13
+    Backup.get_config("NET"),               # 14
+    Backup.get_config("lCryptKeyId"),       # 15
+    Backup.get_config("lCryptKeyName"),     # 16
+    Backup.get_config("lTargetDir").inspect,# 17
+    result]                          # 18
+  
+  if $action == :collect or $action == :copy
+    if $collects.length ==  1
+      fields[2] = "#{$action.to_s.upcase}_#{$collects[0].to_s.upcase}"
+    else
+      fields[2] = $action.to_s.upcase
+    end
+    fields[3] = Backup.get_config("OPT_REMOTE_SET")
+    fields[4] = Backup.get_config("OPT_REMOTE_MODE")
+    fields[13] = Backup.get_config("OPT_HOST")
+    fields[14] = Backup.get_config("OPT_NET")
+  end
+
+  open(new_file,"a") {|f|
+    f.write fields.join(",")
+    f.write "\n"
+  }
+  
+  FileUtils.mv(new_file, Backup.get_config("lStampFileNew"))
+  change_perms(Backup.get_config("lStampFileNew"))
+end
+
+
+##TODO## def copyFtp 
+##TODO##     raise "Not rewritten yet!"
+##TODO## local lBackupDir="$1"
+##TODO## local lRemoteTargetDir="$2"
+##TODO## 
+##TODO##     lConnectLeft=
+##TODO##     lConnectRight=
+##TODO## 
+##TODO##     if [ -z "$OPT_REMOTE_HOST" ] ; then
+##TODO##         log "Remote host not set. Set OPT_REMOTE_HOST to an appropriate value." $LOG_WARN
+##TODO##     else
+##TODO##         lConnectRight=$OPT_REMOTE_HOST
+##TODO##     fi
+##TODO## 
+##TODO##     if [ -z "$OPT_REMOTE_USER" ] ; then
+##TODO##         log "Remote user not set. Set OPT_REMOTE_USER to an appropriate value." $LOG_WARN
+##TODO##     else
+##TODO##         lConnectLeft=$OPT_REMOTE_USER
+##TODO##     fi
+##TODO## 
+##TODO##     if [ -z "$OPT_REMOTE_PASSWORD" ] ; then
+##TODO##         log "Remote password not set. Set OPT_REMOTE_PASSWORD to an appropriate value." $LOG_WARN
+##TODO##     else
+##TODO##         lConnectLeft=$lConnectLeft:$OPT_REMOTE_PASSWORD
+##TODO##     fi
+##TODO## 
+##TODO##     if [ -n "$lConnectLeft" ] ; then
+##TODO##         lConnectLeft=$lConnectLeft@
+##TODO##     fi
+##TODO## 
+##TODO##     log "  ftp-copy '$lBackupDir' to '$lRemoteTargetDir'" $LOG_INFO
+##TODO## 
+##TODO##     lFtpCommand="$CMD_FTP -c \"connect $lConnectLeft$lConnectRight ; mkdir -p '$lRemoteTargetDir'; mirror --reverse '$lBackupDir' '$lRemoteTargetDir'\""
+##TODO## 
+##TODO##     if ! $lFtpCommand ; then
+##TODO##         log "Cannot copy using $CMD_FTP. The failing command was:" $LOG_ERROR
+##TODO##         log "$lFtpCommand" $LOG_ERROR
+##TODO##         log "Failed to copy backup to host $OPT_REMOTE_HOST using ftp." $LOG_FATAL
+##TODO##     fi
+##TODO## }
+##TODO## 
+
+def do_rsync(source, dest, includes, excludes, options)
+  include_options = includes.map {|p| "--include \"#{p}\""}.join(" ")
+  exclude_options = excludes.map {|p| "--exclude \"#{p}\""}.join(" ")
+
+  command = "rsync #{include_options} #{exclude_options} #{options} #{source} #{dest}"
+  $log.info("Executing rsync command: #{command}")
+  execute_command_popen3(command)   
+
+#  "isibackup-main --collect-content --remote-set data --remote-host aristoteles --host pilpo --net green.lakestreet1.ch --archive /test/"
+#      "#{@backup_command} #{rsync_options(log_file("rsync-state"))} #{@common_options} --collect-state",
+#      "#{@backup_command} #{rsync_options(log_file("rsync-state"))} #{@common_options} --collect-state --archive '#{@directory}'" ]
+
+end
+
+##TODO## 
+##TODO## def copyRsync 
+##TODO##     raise "Not rewritten yet!"
+##TODO## local lBackupDir="$1"
+##TODO## local lCopyTargetDir="$2"
+##TODO## 
+##TODO##     FILE_SSH_LOG="$(tempfile -s "$PROGRAM_IDENT")"
+##TODO##     FILE_RSYNC_LOG="$(tempfile -s "$PROGRAM_IDENT")"
+##TODO## 
+##TODO##     if [ "$DIR_PERMS_SET" == "true" -o "$FILE_PERMS_SET" == "true" ] ; then
+##TODO##         OPT_RSYNC_OPTIONS="$OPT_RSYNC_OPTIONS --perms"
+##TODO##     fi
+##TODO## 
+##TODO##     if ! ssh "$OPT_REMOTE_USER@$OPT_REMOTE_HOST" -i $USER_BACKUP_HOME/.ssh/id_dsa mkdir -p "$lCopyTargetDir" >/dev/null 2>$FILE_SSH_LOG; then
+##TODO##         log "$(<$FILE_SSH_LOG)" $LOG_DEBUG
+##TODO##         log "Cannot log into $OPT_REMOTE_HOST using ssh as user $OPT_REMOTE_USER." $LOG_FATAL
+##TODO##     fi
+##TODO## 
+##TODO##     lRsyncCommand="rsync $OPT_RSYNC_OPTIONS $OPT_RSYNC_ADD_OPTIONS --rsh=\"ssh -i $USER_BACKUP_HOME/.ssh/id_dsa\" \"$lBackupDir/\" \"$OPT_REMOTE_USER@$OPT_REMOTE_HOST:$lCopyTargetDir\""
+##TODO##     if [ "$LOGNAME" != "$lIdentUserBackup" ] ; then
+##TODO##       su - "$IDENT_USER_BACKUP" -c "$lRsyncCommand" 2>&1 |
+##TODO##         while read line ; do
+##TODO##             log "$line" $LOG_INFO
+##TODO##         done
+##TODO##     else
+##TODO##       eval "$lRsyncCommand" 2>&1 |
+##TODO##         while read line ; do
+##TODO##             log "$line" $LOG_INFO
+##TODO##         done
+##TODO##     fi
+##TODO##     lErr="$?"
+##TODO##     if [ "$lErr" != "0" ] ; then
+##TODO##         if [ "$lErr" = "23" ] ; then
+##TODO##         # allow error 23 which occurs with chmod and chown difficulties - this is normal for samba target directories, so ignore
+##TODO##             log "rsync returned error 23, which usually means problems with chmod and chown ... ignoring." $LOG_WARNING
+##TODO##         else
+##TODO##             log "Cannot copy using rsync. The failing command was:" $LOG_ERROR
+##TODO##             log "$lRsyncCommand" $LOG_ERROR
+##TODO##             log "Content of the log file:" $LOG_DEBUG
+##TODO##             log "$(<$FILE_RSYNC_LOG)" $LOG_DEBUG
+##TODO##             log "Failed to copy backup to host $OPT_REMOTE_HOST using rsync." $LOG_FATAL
+##TODO##         fi
+##TODO##     fi
+##TODO##     log "$(<$FILE_RSYNC_LOG)" $LOG_INFO
+##TODO##     rm "$FILE_RSYNC_LOG"
+##TODO## 
+##TODO##     log "  done." $LOG_INFO
+##TODO## }
+##TODO## 
+##TODO## 
+
+
+# for version 2.0, we take ruby's
+# cleanpath function.
+def removeDoubleSlashes(path) ; 
+  $log.debug("RemoveDoubleSlashes '#{path.to_s}'.")
+  Pathname.new(path).cleanpath.to_s ;
+end
+
+# for version 2.0, we take ruby's
+# cleanpath function.
+def normalize_path(path)
+  # Strip ending slash from vPath if it exists. Replace multiple
+  # consecutive slashes by a single one
+  $log.debug("Normalize path '#{path.to_s}'.")
+  Pathname.new(path).cleanpath.to_s 
+end
+
+def target_file(file)
+  (Pathname.new(Backup.get_config("lTargetDir")) + file).to_s
+end
+
+def make_absolute(vPath, vRoot)
+  # If vPath is a relative path, prepend vRoot
+  path = Pathname.new(normalize_path(vPath))
+  if path.relative?
+    path = Pathname.new(vRoot).join(vPath)
+  end
+  path.cleanpath.to_s
+end
+
+def getPathBackup(vMode)
+  # get the path where the backup of vMode (e.g. FULL) has been stored
+  Backup.set_config("lDateString",Backup.get_config("TODAY"))
+
+  lUri = bash_eval("$DEFAULT_BACKUP_URI_#{vMode}")
+
+  # Append a number or the time to the date
+  # used only for testing purposes
+  if Backup.get_config("OPT_DIRNUMBERING") and vMode != "full"
+    i = 0
+    while i == 0 or File.exist?(lUri)
+      Backup.set_config("lDateString","#{Backup.get_config("TODAY")}_#{i}")
+      lUri = bash_eval("$DEFAULT_BACKUP_URI_#{vMode}")
+      i += 1
+    end
+    
+  else
+    if Backup.get_config("OPT_DIRWITHTIME") == "true" and vMode != "full"
+      ENV["lDateString"] = Backup.get_config("START_TIME").gsub(":","-").gsub(" ","_")
+      #eval lUri=$(eval echo '$DEFAULT_BACKUP_URI_'$vMode)
+      lUri = bash_eval("$DEFAULT_BACKUP_URI_#{vMode}")
+    end
+  end
+
+  ## this was the configurable version
+  #lIdentPath="PATH_$(echo "$vMode" | tr '[a-z]' '[A-Z]')"
+  #lUri="${!lIdentPath}"
+
+  lTargetDir = make_absolute(lUri,Backup.get_config("BACKUP_ROOT"))
+  
+  if lTargetDir == ""
+    raise "Target Directory not set. Set $BACKUP_ROOT to an appropriate value."
+  end
+ 
+  if Backup.get_config("OPT_RECREATE_ARCHIVE") == "true" 
+    $log.info("Deleting Archive. #{lTargetDir}")
+    raise "Oooups!! Think you don't want to remove '#{lTargetDir}'!! Exiting!!" if 
+      lTargetDir =~ /^\/?(usr|var|opt|etc|lib|home|bin|boot|dev|sys)?$/
+    FileUtils.rm_rf(lTargetDir)
+  end
+
+  # create target directory
+  if !Pathname.new(lTargetDir).exist?
+    if lTargetDir.length > Backup.get_config("MAX_PATHLEN").to_i
+      raise "Won't be able (and won't try) to create target directory '#{lTargetDir}', as its name has #{lTargetDir.length} characters and thus is longer than MAX_PATHLEN #{Backup.get_config("MAX_PATHLEN")}... skipping."
+    end
+    makedir_perms(lTargetDir)
+  end
+
+  return lTargetDir
+end
+
+def checkLock 
+  $log.debug { "Checking if there is an other instance running ... "}
+  raise "No lockfile defined." unless Backup.get_config("LOCK_FILE")
+    
+  $waiting_for_lock = true
+  $log.debug{"LOCK_TIME: #{Backup.get_config("LOCK_TIME")} LOCK_FILE: #{Backup.get_config("LOCK_FILE")}"}
+
+  if system("lockfile -1 -r3 -l #{Backup.get_config("LOCK_TIME")} '#{Backup.get_config("LOCK_FILE")}'") then
+    $waiting_for_lock = false
+    $log.debug {"No (more)."}
+  else
+    $log.fatal { "A lockfile '#{Backup.get_config("LOCK_FILE")}' exists."}
+    $log.fatal { "This normaly indicates another instance of #{Backup.get_config("PROGRAM_IDENT")} is running, so abort."}
+    $log.fatal { "Remove the lockfile '#{Backup.get_config("LOCK_FILE")}' and restart #{Backup.get_config("PROGRAM_IDENT")} if you think this is not true."}
+    raise "Could not get lock '#{get_config"LOCK_FILE"}'."
+  end
+end
+
+def encode_string(str)
+  $log.debug{"Encoding string #{str.inspect}"}
+#  # old recodeVFATChars
+#  str.gsub(/\:/) {|match| "%1A" }  
+  # new version
+  return nil if str.nil?
+  str.gsub($file_name_escape_pattern) {|match|
+    raise "FILE_NAME_ESCAPE_PATTERN matched more than one character." if 
+      match.to_s.length > 1
+    "%" + match[0].to_s(16).rjust(2,"0") 
+  }  
+end
+def encode_path(pathname)
+  $log.debug{"Encoding path #{pathname.to_s}"}
+  paths = []
+  d1 = pathname
+  while !["."].include?((d1,d2 = d1.split)[1].to_s)
+    raise "Unexpected root path" if d2.to_s == "/" #,"/"
+    paths.push(d2.to_s)
+  end
+  new_path = Pathname.new(".")
+  paths.reverse.each{|p| new_path += encode_string(p) }
+  new_path
+end
+
+def decode_string(str)
+  # new version
+  return nil if str.nil?
+  # if you do changes here
+  # do also the changes in
+  # isirestore
+  str.gsub(/\%([0-9a-f]{2})/) {|match| "" << $1.to_i(16) }
+end
+
+def checkCrypter 
+  $log.debug{"Check crypt command #{Backup.get_config("CMD_CRYPT")}"}
+  # check if selected crypter is executable
+  Backup.set_config("CMD_CRYPT", nil) if Backup.get_config("CMD_CRYPT") == "none"
+  
+  unless Backup.get_config("CMD_CRYPT")
+    Backup.set_config("EXT_CRYPT", nil)
+    return
+  end
+
+  checkProgram(Backup.get_config("CMD_CRYPT")) 
+
+  lValidKeyCount=0
+
+  # check if selected backup key is available
+  case Backup.get_config("CMD_CRYPT")
+  when "gpg"
+    raise "CRYPT_KEYS not set for crypt method gpg." unless Backup.get_config("CRYPT_KEYS")
+    Backup.get_config("CRYPT_KEYS").split("\n").each {|crypt_key|
+      
+      cmd = "(gpg --list-keys --with-colons '#{crypt_key}' | grep '^pub' | cut -d: -f5)"
+      $log.debug{"Finding keys with #{cmd.inspect}"}
+      lCryptKey = open("|#{cmd}") {|f| f.readlines}
+      unless $?.success?
+	raise "Selected crypt key '#{crypt_key}' is not available." unless $?.success?
+      else
+	if lCryptKey.length > 1
+	  $log.error{"List of selected keys: #{lCryptKey.join(", ")}"}
+	  $log.error{"Please make CRYPT_KEY more specific."}
+	  raise "Selected crypt key '#{crypt_key}' does not lead to unique selection."
+	end
+	
+	cmd = "gpg --list-keys --with-colons '#{crypt_key}' | grep '^pub:[uf]' > /dev/null"
+	$log.debug{"Checking trust with #{cmd.inspect}"}
+	unless system(cmd)
+	  $log.error{"Selected crypt key '#{crypt_key}' is not fully trusted."}
+	  $log.error{"Please use gpg to update the trust."}
+	  raise "Selected crypt key '#{crypt_key} is not fully trusted."
+	end
+	
+	lValidKeyCount+=1
+
+	def append_to_var(name, variable, cmd, seperator = nil)
+	  $log.debug{"Exporting #{name} with #{cmd.inspect}"}
+	  content = open("|#{cmd}") {|f| f.readlines.join}
+	  raise "Could not export #{name}." unless $?.success?
+	  $log.debug{"Exported #{name} is #{content.inspect}"}
+	  content = content.inspect if seperator and content.to_s.include?(seperator)
+	  if seperator
+	    Backup.set_config(variable,Backup.get_config(variable,"") + content.strip + seperator)
+	  else
+	    Backup.set_config(variable,Backup.get_config(variable,"") + content)
+	  end
+	end
+	append_to_var("key_content", "lCryptKeyContent", "gpg --export --armor '#{crypt_key}'")
+	append_to_var("key_id", "lCryptKeyId", "gpg --list-keys --with-colons '#{crypt_key}' | grep '^pub' | cut -d: -f5",";")
+	append_to_var("key_name", "lCryptKeyName", "gpg --list-keys --with-colons '#{crypt_key}' | grep '^pub' | cut -d: -f10",";")
+	
+	$log.info{"Key '#{crypt_key}' available."}
+      end
+      
+    }
+    flags = Backup.get_config("CRYPT_KEYS").split("\n").map {|crypt_key| "--recipient '#{crypt_key}'"}.join(" ")
+    Backup.set_config("Recipient_Flags",flags)    
+    Backup.set_config("EXT_CRYPT",".gpg")
+  else
+    raise "Undefined encryption method '#{Backup.get_config("CMD_CRYPT")} in CMD_CRYPT."
+  end
+  
+  #remove the trailing semicolon
+  Backup.set_config("lCryptKeyId",Backup.get_config("lCryptKeyId")[0..-2])
+  Backup.set_config("lCryptKeyName",Backup.get_config("lCryptKeyName")[0..-2])
+
+  raise "No keys specified for encryption." if lValidKeyCount == 0 
+end
+def checkCryptedBackup
+  # check if we backup with the same backup key as the last full backup
+  # TODO check if there was a backup but was not encrypted
+  cmd = "sed -ne 's/.*,BACKUP,$OPT_SET.*$HOST,$NET,\([^,]*\),.*,completed[^,]*/\1/;Te;p;:e' #{Backup.get_config("lStampFileNew")} | tail -n1"
+  raise "lStampFileNew undefined." unless Backup.get_config("lStampFileNew")
+  $log.debug{"get last crypt key with #{cmd.inspect}"}
+  lLastCryptKeyId=open("|#{cmd}") {|f| f.readlines.join.strip}
+  raise "Could not get last crypt key." unless $?.success?
+  lLastCryptKeyId = nil if lLastCryptKeyId == ""
+
+  if !lLastCryptKeyId.nil? and # this should be a check while parsing old log file
+      lLastCryptKeyId != Backup.get_config("lCryptKeyId") and Backup.get_config("OPT_RECREATE_ARCHIVE") != "true"
+    raise "Backup Keys IDs changed from #{lLastCryptKeyId} to #{Backup.get_config("lCryptKeyId")}, do a full backup with option --recreate-archive"
+  end
+end
+
+def check_copier(vCopier)
+  $log.info("Check sanity of copying method '#{vCopier}'")
+  case vCopier 
+  when "rsync"
+    # check if selected copier is executable
+    checkProgram(vCopier)
+    checkProgram("ssh")
+  when "ftp"
+     checkProgram(Backup.get_config("CMD_FTP"))
+  else
+    raise "Undefinded copier #{vCopier} given in CMD_REMOTE_METHOD."
+  end
+end
+
+def checkProgram(name)
+  real_file = (open("|which #{name}") {|f| f.readline.strip}  rescue "")
+
+  unless File.executable_real?(real_file)
+    raise "#{name} is not available or not executable"
+  end
+  $log.info("#{real_file} is executable")
+end
+
+def checkPacker 
+  $log.debug{"Check pack method '#{Backup.get_config("OPT_PACKMETHOD")}'."}
+
+  raise "Pack method is emtpy." unless Backup.get_config("OPT_PACKMETHOD")
+
+  Backup.set_config("EXT_PACK",".#{Backup.get_config("OPT_PACKMETHOD")}")
+
+  unless Backup.get_config("OPT_PACKMETHOD") =~ /^([a-z0-9]+)(\.([a-z0-9]+))?$/
+    raise "Invalid pack method #{ Backup.get_config("OPT_PACKMETHOD")}. Must be in the form PACKER.COMPRESSOR or only PACKER (eg. cpio.gzip)."
+  end
+
+  $log.debug{"Packer: #{$1} Compressor: #{$3}"}
+  packer = $1
+  compressor = $3
+
+  # check the packer (if external)
+  case packer
+  when "cpio","tar"
+    Backup.set_config("CMD_PACK",packer)
+  when "zip"
+    Backup.set_config("CMD_PACK","zip")    
+    Backup.set_config("CMD_COMPRESS","zip")
+  else
+    raise "OPT_PACKMETHOD invalid #{Backup.get_config("OPT_PACKMETHOD")}, packer #{packer} not supported."
+  end
+
+  # check the compressor
+  case compressor
+  when "bz2"
+      Backup.set_config("CMD_COMPRESS","bzip2")
+  when "gz"
+      Backup.set_config("CMD_COMPRESS","gzip")
+  when "zip"
+    raise "Zip is already in packer and may not be specified again."
+  else
+    raise "OPT_PACKMETHOD invalid #{Backup.get_config("OPT_PACKMETHOD")}, compressor #{compressor} not supported."
+  end
+
+  # FROM VERSION 1.8      
+  ##TODO## #        zoo|?*.zoo) CMD_COMPRESS=zoo ;;
+  ##TODO## #        rar|?*.rar) CMD_COMPRESS=rar log "Please be aware that while rar works in most cases, it cannot handle direcotries with many files. As it requires the file list on the command line and cannot read it neither from file nor stdin, its capabilities for handling large directories are limited. isibackup will quit when it encounters such a directory, and the backup will not be completed." $LOG_WARNING ;;
+  
+  # check if the programs are available  
+  checkProgram(Backup.get_config("CMD_PACK"))
+  checkProgram(Backup.get_config("CMD_COMPRESS")) if Backup.get_config("CMD_COMPRESS")    
+end
+
+##TODO## 
+##TODO## def checkTime 
+##TODO##     raise "Not rewritten yet!"
+##TODO##     log "Checking if ntp is configured '$OPT_CHECKNTPSERVER'." $LOG_INFO
+##TODO##     if [ "$OPT_CHECKNTPSERVER" == "true" ] ; then
+##TODO##         ntpq -c rv 2>/dev/null | grep sync_ntp > /dev/null || log "NTP server not found or out of sync" $LOG_FATAL
+##TODO##     fi
+##TODO## }
+##TODO## 
+
+# TODO: check if the packers support
+#  "setgid?" =>  "setgid bit set",
+#  "setuid?" => "setuid bit set",
+#  "sticky?" => "sticky bit set"
+BAD_PACKERS = {
+  "zip" => ["blockdev?","chardev?","pipe?","socket?"],
+  "rar" => ["blockdev?","chardev?","pipe?"],
+  "zoo" => ["blockdev?","chardev?","pipe?","socket?","symlink?"]
+}
+TRICKY_FILES = {
+  "blockdev?" => "block speicail device",
+  "chardev?" => "character special device",
+  "pipe?" => "named pipe",
+  "socket?" => "socket",
+  "symlink?" => "symbolic link",
+  "setgid?" =>  "setgid bit set",
+  "setuid?" => "setuid bit set",
+  "sticky?" => "sticky bit set"
+}
+
+# check if file can be backed up
+def checkFile(file, pack_method)
+  # file must be a pathname
+  if !file.symlink? and !file.readable?
+    log_skipped(file, "unreadable")
+    return false
+  end
+    
+  stat = file.lstat
+
+  if pack_method =~ /^cpio/ and !file.symlink? and file.size > Backup.get_config("CPIO_MAX_SIZE").to_i
+    $log.warn("File #{file.to_s} is too big (#{file.size} bytes) for packer cpio (CPIO_MAX_SIZ is #{Backup.get_config("CPIO_MAX_SIZE")} bytes), maybe you should use tar instead.")
+    log_skipped(file, "size #{file.size} is too big for cpio")
+    return false
+  end
+
+  TRICKY_FILES.each {|method, desc|
+    if stat.send(method)
+      # This is a tricky file, checking packer if it supports
+      # these kind of files
+      unsupported_files = (BAD_PACKERS[pack_method] or [])
+      if unsupported_files.include?(method)
+	log_skipped(file, "#{desc} file. #{Backup.get_config("OPT_PACKMETHOD")} does not support this.")
+	return false
+      end
+    end
+  }
+  return true
+end
+
+# Count sizes of the file list
+# and removes files that cannot
+# be backed up.
+## TODO total_size is now bytes does this matter?
+def sum_and_clean_file_list(file_list)
+  $log.debug{"Counting files in '#{file_list}'."}
+  lFileCount = 0
+  lDirCount = 0
+  lTotalSize  = 0
+
+  file_list = Pathname.new(file_list)
+  raise "Given file list does not exist #{file_list.to_s}" unless
+    file_list.exist?
+  file_list_copy = Pathname.new("#{file_list.to_s}.tmp")
+  FileUtils.copy(file_list.to_s, file_list_copy.to_s)
+ 
+  begin
+    file_list.open("w") {|fl|
+      file_list_copy.each_line {|lFile|
+	lFile = Pathname.new(lFile.strip)
+	$log.debug{"Checking file '#{lFile}'."}
+
+	# Append to new list if file can
+	# be processed by backup programs
+	unless checkFile(lFile,Backup.get_config("OPT_PACKMETHOD"))
+	  $log.debug{"Skipped file for counting."}	  
+	else
+	  if !lFile.symlink? and lFile.directory?
+	    lFileSize = Backup.get_config("DEF_PACKEDBLOCKSIZE").to_i
+	    lDirCount += 1
+	  else
+	    # $(du "$lFile" | cut -f1)
+	    lFileSize = File.lstat(lFile).size
+	    lFileCount += 1
+	  end
+	  fl.write("#{lFile}\n")
+
+	  # originally these were blocks
+	  if lFileSize < 0
+	    $log.error{"file '#{lFile.to_s}' reports a size smaller than zero (#{lFileSize}). This is probably an integer overflow and an indication for a very large file. It is being added with th maximum file system size ($MAX_FSFILESIZE). Maybe there will be errors all the same."}
+	    lFileSize=Backup.get_config("MAX_FSFILESIZE").to_i
+	  end
+      
+	  lTotalSizePrev=lTotalSize
+	  lTotalSize+=lFileSize
+	  if lTotalSize < 0 or lTotalSize < lTotalSizePrev
+	    $log.error{"The directory size just shrinked by adding the file '#{lFile}' with '#{lFileSize}' from a total of '#{lTotalSizePrev}' to '#{lTotalSize}'. This is not plausible and probably the result of an integer overflow. This file is not being added to the size, and size is being set to the maxium file system file size, or to the previously summed size, whichever is larger, in order to provoke 'separate mode' instead of 'collect mode'. Maybe there will be errors all the same."}
+	    if lTotalSize_prev < Backup.get_config("MAX_FSFILESIZE").to_i
+	      lTotalSize=Backup.get_config("MAX_FSFILESIZE").to_i + 1
+	    else
+	      lTotalSize=lTotalSizePrev
+	    end
+	  end
+	  
+	  $log.debug{"TotalSize: '#{lTotalSize}' FileCount: '#{lFileCount}' DirCount: '#{lDirCount}'."}
+	end
+      }
+    }
+  rescue
+    FileUtils.rm_f(file_list_copy.to_s)
+    raise
+  end
+  
+  [lTotalSize, lFileCount, lDirCount]
+end
+
+##TODO## def move_file 
+##TODO##     raise "Not rewritten yet!"
+##TODO##     log "Move file from '$1' to '$2'." $LOG_INFO
+##TODO## #set -vx
+##TODO##     lMvSrc="$1"
+##TODO##     lMvTgt="$2"
+##TODO##     lMoveError=$(mv -f "$lMvSrc" "$lMvTgt" 2>&1)
+##TODO##     if [ $? -ne 0 ]; then
+##TODO##         echo "$lMoveError" >&2
+##TODO##         log "Error occured while moving file." $LOG_FATAL
+##TODO##     fi
+##TODO##     change_perms "$lMvTgt"
+##TODO##     # this has made a separate def replacing the original use of mv
+##TODO##     # as mv was not able to consider the USER_SET settings
+##TODO##     # moving a file is, essentially, copying it and deleting the original
+##TODO##     # if source and target are on same device, move it all the same
+##TODO##     # to determine that, use df of the directory. as the last line of that may start empty in case of long share names, try the second last one, too
+##TODO## #    lMvSrcDev="$(df "$(dirname "$lMvSrc")" | tail -1 | cut -f 1 -d ' ' | cut -f 1 -d $'\t')"
+##TODO## #    if [ -z "$lMvSrcDev" ] ; then
+##TODO## #      lMvSrcDev="$(df "$(dirname "$lMvSrc")" | tail -2 | head -1 | cut -f 1 -d ' ' | cut -f 1 -d $'\t')"
+##TODO## #    fi
+##TODO## #    lMvTgtDev="$(df "$(dirname "$lMvTgt")" | tail -1 | cut -f 1 -d ' ' | cut -f 1 -d $'\t')"
+##TODO## #    if [ -z "$lMvTgtDev" ] ; then
+##TODO## #      lMvTgtDev="$(df "$(dirname "$lMvTgt")" | tail -2 | head -1 | cut -f 1 -d ' ' | cut -f 1 -d $'\t')"
+##TODO## #    fi
+##TODO## #    if [ "$lMvSrcDev" == "$lMvTgtDev" ] ; then
+##TODO## #        mv -f "$lMvSrc" "$lMvTgt"
+##TODO## #    else
+##TODO## #        cp "$lMvSrc" "$lMvTgt"
+##TODO## #        change_perms "$lMvTgt"
+##TODO## #        rm -f "$lMvSrc" 
+##TODO## #    fi
+##TODO## #set +vx
+##TODO## #    return 0
+##TODO## }
+##TODO## 
+
+def createDirList(source_dir, list_file, old_list = nil)
+  new_list = FilePathList.new
+  new_list.temp_file = list_file
+
+  $log.info("Creating dirlist for '#{source_dir}'.")
+  
+  # find all files in include directories
+  skip_other_filesystems = !(Backup.get_config("OPT_FILESYSTEMS") == "true")
+  backup_dir = Pathname.new(Backup.get_config("BACKUP_ROOT")).realpath.to_s
+  exclude_regexps = Backup.get_config("OPT_EXCLUDE_DIRS","").split("\n").map {|s| Regexp.new(s)}
+  $log.debug("Exclude regexps are:")
+  exclude_regexps.each {|r| $log.debug(r.inspect)}
+  
+  expected_dircount = 0
+  if progress_bar_enabled?
+    if old_list
+      expected_dircount = old_list.length
+    end
+    Backup.get_config("OPT_INCLUDE_DIRS").split("\n").each {|lIncludeDir|
+      lFindDirs = Dir.glob((Pathname.new(source_dir) + "./#{lIncludeDir}").to_s)
+      expected_dircount += lFindDirs.length
+    }    
+  end
+  
+  progress_bar("CreateDirlist", expected_dircount) {
+  
+    Backup.get_config("OPT_INCLUDE_DIRS","").split("\n").each {|lIncludeDir|
+      $log.info("Processing include dir: '#{lIncludeDir}'")
+      
+      lFindDirs = Dir.glob((Pathname.new(source_dir) + "./#{lIncludeDir}").to_s)
+      if lFindDirs.length == 0
+	log_skipped(lIncludeDir.to_s, "Directory does not exist")
+	next
+      end
+
+      # we need to do our find for each of the entries
+      # first we search unquoted, as otherwise we do not get the individual entries from a pattern!
+      lFindDirs.each {|lFindDir|
+	pinc("Scanning",lFindDir)
+	lFindDir = Pathname.new(normalize_path(lFindDir))
+		
+	if lFindDir.symlink? and !lFindDir.directory?
+	  log_skipped(lFindDir, "Include Dir is not a directory.")
+	  next
+	end
+	
+	new_list.append(lFindDir) {|path|
+	  begin
+	    if path.symlink?
+	      $log.debug{"Skipping '#{path}', its a symlink."}
+	      Find.prune
+	      next 
+	    end
+	    
+	    if !path.directory?
+	      $log.debug{"Skipping '#{path}', its not a directory."}
+	      Find.prune
+	      next
+	    end
+	    
+	    pmsg("Scanning","#{path}") if progress_bar_enabled?
+	    
+	    if skip_other_filesystems and lFindDir != path and path.mountpoint?
+	      log_skipped(path, "Ignoring subdirectories of, its a mount point")
+	      Find.prune
+	      next
+	    end
+	    
+	    path = path.realpath
+	    
+	    if path.to_s.index(backup_dir) == 0
+	      log_skipped(path, "Ignoring directory, it's a subpath of BACKUP_ROOT.")
+	      Find.prune
+	      next
+	    end
+	    
+	    unless exclude_regexps.each {|r|
+		match = (path.to_s =~ r)
+		$log.debug{"'#{path.to_s}' =~ #{r.inspect}: #{match}"}
+		if match
+		  log_skipped(path, "Ignoring directory, it matches exclude dir #{r.inspect}")
+		  break
+		end
+	      }
+	      # TODO: prune only if the regexp will match every descendant.
+	      # how to determine?
+	      Find.prune	     
+	      next
+	    end
+	    
+	    # adding directory for backup without source_dir
+	    if path.to_s.index(source_dir) == 0
+	      pinc if old_list
+	      $log.debug{"Adding path to dirlist: '#{path.to_s}'"}
+	      #raise "xx"
+	      #full_list.write(path.to_s)
+	      #full_list.write("\n")	      
+	      true
+	    else
+	      raise "Found directory that is not in source path '#{source_dir}': '#{path.to_s}'"
+	    end
+	  rescue Errno::ENOENT
+	    add_statistic(:directories_escaped, 1)	    
+	    $log.skipped("Directory disappeared while create filelist: #{$!}")
+	    next
+	  end
+	}
+      }
+    }
+  }
+  
+  raise "No source directories found!" if new_list.length == 0
+  # sort directory list and remove double entries
+  new_list.make_relative_to(source_dir)
+  new_list.sort_uniq
+
+  
+  # IF WE STILL WANT THAT. Skipped entires are in skipped log
+  ##TODO## 
+  ##TODO##     show_progress "Sorting $(wc -l < "$lFileDirs.filtered") directories"
+  ##TODO##     echo
+  ##TODO## 
+  ##TODO##     # generate list of skipped files
+  ##TODO##     diff "$lFileDirs.full.sorted" "$lFileDirs.filtered" > "$lFileDirs.skipped" || true
+  ##TODO##     cat "$lFileDirs.full.sorted" > "$lSettingsFile.dirs.full.sorted"
+  ##TODO##     rm -f "$lSettingsFile.dirs.full.sorted.gz"
+  ##TODO##     gzip "$lSettingsFile.dirs.full.sorted"
+  ##TODO##     cat "$lFileDirs.filtered" > "$lSettingsFile.dirs.filtered"
+  ##TODO##     rm -f "$lSettingsFile.dirs.filtered.gz"
+  ##TODO##     gzip "$lSettingsFile.dirs.filtered"
+  ##TODO##     cat "$lFileDirs.skipped" > "$lSettingsFile.dirs.full.skipped"
+  ##TODO##     rm -f "$lSettingsFile.dirs.full.skipped.gz"
+  ##TODO##     gzip "$lSettingsFile.dirs.full.skipped"
+  new_list
+end
+
+def execute_command(cmd)
+  $log.debug("Executing: #{cmd.inspect}")
+  unless system(cmd)
+    $log.debug{"Pwd was: #{FileUtils.pwd}"}
+    raise "Unable to execute command:#{cmd}" 
+  end
+end
+
+def removeOldBackupDirs(target_dir, dirlist)
+  # remove directories present in backup but deleted in original
+  return unless Backup.get_config("OPT_MODE") == "full"
+  $log.info{"Removing old backup dirs in '#{target_dir}'"}
+
+  sub = "#{target_dir.to_s}/"
+
+  mapped_dirs = []
+  dirlist.each {|d| mapped_dirs.push(encode_path(d.pathname).to_s)}
+  if $log.debug? 
+    mapped_dirs.each {|d| $log.debug("Mapped: #{d.inspect}")}
+  end
+
+  progress_bar("CleanDir", dirlist.length) {
+    $log.debug{"Changing to '#{target_dir}'"}
+    FileUtils.cd(target_dir) {
+      target_dir.find {|path|	
+	$log.debug{"Checking '#{path}'"}
+	next if path == target_dir
+	raise "Unexpected path #{path}" unless path.to_s.index(sub) == 0
+	path = Pathname.new(path.to_s.sub(sub, ""))
+	
+	next if path.to_s == "isibackup"
+	next unless path.directory?
+	pinc("Cleaning",path)
+
+	key = Regexp.new("^#{Regexp.escape(path)}")	
+	$log.debug{"Regexp: #{key.inspect}"}
+	to_delete =  mapped_dirs.each {|p| if p =~ key then break(false) end}
+	if to_delete
+	  raise "Path is not relative!!" if path.to_s =~ /^\//
+	  # TODO set this to info
+	  $log.warn{"Removing deleted backup directory: '#{path.to_s}' in '#{target_dir}'"}
+	  pmsg("Removing",(target_dir + path).to_s)
+	  FileUtils.rm_r(path.to_s)
+	  add_statistic(:directories_removed, 1)
+	end
+      }
+    }
+  }
+end
+
+
+GROUP_SMALLEST = 0.25
+GROUP_STEP_MUL = 2
+GROUP_COUNT_BASE = 4
+GROUP_BASE_SIZE = 1024**2
+GROUP_BASE_SYM = "m"
+
+def group_count_function(max_size)
+  GROUP_COUNT_BASE ** (2+Math.log(max_size)/Math.log(2))
+end
+
+def backup_mode(file, total_count, total_size)
+  fs = File.lstat(file).size
+  if !file.symlink? and (fs > $max_collect_size)
+    :separate
+  else
+    # some collect mode
+    if (total_count > $max_single_collect_count) or (total_size > $max_fs_file_size)
+      cur_size = fs
+      
+      cur_step_index = 0
+      while (($group_steps[cur_step_index] * GROUP_BASE_SIZE) < cur_size)
+	cur_step_index += 1
+      end
+      
+      cur_count = $group_counts[cur_step_index]
+      cur_step = $group_steps[cur_step_index]
+      cur_num = file.basename.to_s.hash % cur_count
+      
+      ("collect_%g#{GROUP_BASE_SYM}_%i" % [cur_step, cur_num]).to_sym
+    else
+      :collect
+    end
+  end  
+end
+
+def remove_old_backup_files(target_dir, mode, directory = nil, file_name = nil, remove_current = false)
+  all = backup_files(target_dir, mode, directory, file_name)
+  current = nil
+  current = backup_file(target_dir, mode, directory, file_name) unless remove_current
+
+  raise "Should remove old backup files but current backup file #{current.to_s} does not exist!" if 
+    current and !current.exist?
+  all.each {|bf|
+    next if bf == current
+    $log.warn("Removing old #{mode} backup backup file #{bf.to_s} (current #{(current or "REMOVED" ).to_s}}")
+    yield bf if block_given?
+    FileUtils.rm(bf)    
+  }
+end
+
+def backup_files(target_dir, mode, directory = nil, file_name = nil)
+  base_file = backup_file(target_dir, mode, directory, file_name, false)  
+  a = [base_file.to_s + ".{cpio,tar}.{bz2,gz}",
+    base_file.to_s + ".{cpio,tar}.{bz2,gz}.gpg",
+    base_file.to_s + ".zip.gpg"].map {|glob|
+    $log.debug("Globbing for #{glob}")
+    Pathname.glob(glob)
+  }.flatten
+end
+
+#def backup_file(file, target_dir, mode, override_name = nil)
+def backup_file(target_dir, mode, directory = nil, file_name = nil, with_ext = true)
+  $log.debug{"Finding backup file for mode: '#{mode}', directory: '#{directory}', file_name: '#{file_name}'"}
+  raise "Filename required for separate mode." if file_name.nil? and mode == "separate"
+  if directory.nil?
+    directory = Pathname.new(".")
+  else
+    directory = Pathname.new(directory)
+  end
+  case mode.to_s
+  when "separate"
+    target_name = file_name.to_s
+    if target_name.to_s == directory.basename.to_s
+      target_name = target_name + "_FILE_"
+    end
+  when /^collect(.+)?$/
+    postfix = $1
+    if file_name.nil? and directory.to_s == "."
+      target_name = "rootdir"
+    else
+      target_name = (file_name or directory.basename)
+    end
+    target_name = "#{target_name}#{postfix}"    
+  when "pathonly"
+    target_name = nil
+  else
+    raise "Unexpected mode '#{mode}'"
+  end
+  
+  target_directory = directory
+  target_directory = directory + target_name if target_name
+  target_directory = encode_path(target_directory)
+  
+  target_file = Pathname.new(target_directory)
+  
+  if with_ext and mode != :pathonly
+    if Backup.get_config("CMD_CRYPT")
+      target_file = Pathname.new("#{target_file}#{Backup.get_config("EXT_PACK")}#{Backup.get_config("EXT_CRYPT")}")
+    else
+      target_file = Pathname.new("#{target_file}#{Backup.get_config("EXT_PACK")}")
+    end
+  end
+
+
+  target_file = target_file.cleanpath
+  if target_file.to_s.length > Backup.get_config("MAX_PATHLEN").to_i
+    raise "Target file too long (>#{Backup.get_config("MAX_PATHLEN")}): '#{target_file.realpath.to_s}'"
+  end
+  target_dir + target_file
+end
+
+def file_need_backup(file) #DISABLED NEWER THAN, newer_than)
+  if Backup.get_config("OPT_INCLUDE_FILES")
+    include_files = Backup.get_config("OPT_INCLUDE_FILES").split("\n")
+    
+    raise "Include Files not implemnted yet."
+    # FIND COMMAND WAS:
+    ##TODO##                     find "$(removeDoubleSlashes "#{dir.to_s}/")" -name "$lIncludeFile" ! -type d -maxdepth 1 $lFileFindOptions >> "$lFileListTmpFName" 2>> $LOG_SKIPPED_FILE || true
+  end
+  
+  if !file.symlink?
+    if !file.exist?
+      $log.warn{"'#{file}' disappeared before making backup."}
+      return false
+    end
+
+    if file.directory?
+      $log.debug{"Skipping, is a directory"}
+      return false
+    end
+  else
+    # ok, if its a symlink the file exist.
+  end
+  
+  if (time = lmtime(file)) > Time.now
+    $log.error{"File '#{file}' has mtime ('#{time}') in the future."}
+    return true
+  end
+    
+#DISABLED NEWER THAN  if newer_than and file_mtime < newer_than
+#DISABLED NEWER THAN    $log.debug{"Skipping file, its older than reference date."}
+#DISABLED NEWER THAN    return false
+#DISABLED NEWER THAN  end
+  
+  # TODO: not always do this, optimize
+  exclude_files = Backup.get_config("OPT_EXCLUDE_FILES","").split("\n")
+  exclude_regexps = exclude_files.map {|r| Regexp.new(r)}
+  exclude_regexps.each {|r|
+    match = (file.to_s =~ r)
+    $log.debug{"'#{file.to_s}' =~ #{r.inspect}: #{match}"}
+    if match
+      log_skipped(file, "Ignoring file, it matches exclude file #{r.inspect}")
+      return false
+    end
+  }
+  
+  #TODO  if Backup.get_config("OPT_MODE") == "full" and
+  #TODO      Backup.get_config("OPT_NO_DIR_RENEWAL") != "true"
+  #TODO    dir = file.dirname
+  #TODO    dir_time = lmtime(dir)
+  
+  #TODO BASICALLY, SHOULDN'T WE USE ctime HERE???
+  #                WHY NOT ALWAYS??
+  #TODO hm I also need backup if a file in my directory changed
+  #     this means if another file should be backed up in my backup file
+  
+  #TODO    raise "TODO"
+  #TODO    if ((bf = backup_file(file, target_dir, "collect")).exist? and dir_time > lmtime(bf)) or
+  #TODO      ((bf = backup_file(file, target_dir, "separate")).exist? and dir_time > lmtime(bf))
+  #TODO      $log.debug{"'#{dir}' is newer than '#{bf}'. Going to create backup."}
+  #TODO      return true
+  #TODO    end    
+  #TODO    end  end
+
+  return true
+end
+
+# in the generated file list we only have files
+# that must be included in the next backup
+def createFileList(dir, listfile) #newer_than = nil)
+  new_list = FilePathList.new
+  new_list.temp_file = listfile
+
+  $log.debug{"Create File List in Directory '#{dir}' to '#{listfile}'."}
+#DISABLED NEWER THAN:  $log.info{"Only select files newer than #{newer_than.strftime("%F %T")}"} if newer_than
+  dir = Pathname.new(dir)
+
+  raise Errno::ENOENT.new(dir) if !dir.symlink? and !dir.exist?
+  raise "Not a directory: #{dir.to_s}" if dir.symlink? or !dir.directory?
+
+  # create list of files to be backed up in this directory
+  FileUtils.rm_f(listfile)
+  
+  new_list.append_entries(dir) {|entry|
+    $log.debug{"Processing entry '#{entry}' for file list."}
+
+    if file_need_backup(entry) #DISABLED NEWER THAN, newer_than)
+      $log.debug{"Writing entry to file list."}
+      true
+    else
+    end
+  }
+  new_list
+end
+
+def recordSetting(vSettingName,vSettingRemark = nil, vSettingValue = nil)
+  raise "No name given." unless vSettingName
+  
+  ret = ""
+  ret += "#{vSettingRemark}\n" if vSettingRemark
+
+  vSettingValue = Backup.get_config(vSettingName) unless vSettingValue
+  $log.info("No value given to record for setting #{vSettingName}.") unless vSettingValue
+
+  ret += "#{vSettingName}=#{vSettingValue.inspect}\n"
+end
+
+##TODO## def writeSettings 
+##TODO##     raise "Not rewritten yet!"
+##TODO##     vSettingFile="$1"
+##TODO## 
+##TODO##     cat "$1" >> "$lSettingsFile"
+##TODO## }
+
+def recordBackupSettings 
+  open(Backup.get_config("lSettingsFile"),"a") {|f|
+    f.write(recordSetting("NET", "# This file contains the settings that were used to create this backup. It starts with the name of the network."))
+    f.write(recordSetting("HOST", "# Name of the host backuped"))
+    f.write(recordSetting("TODAY", "# Date of the backup"))
+    f.write(recordSetting("STARTDATETIME","# Date format used for log file names"))
+    f.write(recordSetting("MAX_FSFILESIZE","# Maximum assumed size of a file in the backup target directory filesystem. Files beyond this size were split..."))
+    f.write(recordSetting("PROGRAM_IDENT","# Information about the program and its version"))
+    f.write(recordSetting("PROGRAM_VERSION"))
+    f.write(recordSetting("COMMAND","# The internal command used to create this file", Backup.get_config("lIsiBackupCmd")))
+    f.write(recordSetting("LOG_LEVEL", "# The level of logging used"))
+f.write(recordSetting("LOG_FILE", "# The log file original location. A copy will be saved at $lSettingsFile.log"))
+    f.write(recordSetting("LOG_ERROR_FILE", "# The error log file original location. A copy will be saved at $lSettingsFile.error.log"))
+    f.write(recordSetting("OPT_MODE", "# The backup mode used for creating this backup"))
+    f.write(recordSetting("OPT_SINCE","# The date of the last full backup where this is against."))
+    f.write(recordSetting("OPT_FILESYSTEMS", "# Were other filesystems to be backuped (\"no\" implies the -xdev switch)"))
+    f.write(recordSetting("OPT_ARCHIVE"))
+    f.write(recordSetting("OPT_REMOTE_USER","# This one and the following parameters are used for remote backup procedures. They may be empty. The password will not be revealed."))
+    f.write(recordSetting("OPT_REMOTE_HOST"))
+    f.write(recordSetting("OPT_REMOTE_PATH"))
+    f.write(recordSetting("OPT_REMOTE_METHOD"))
+    f.write(recordSetting("OPT_RSYNC_ADD_OPTIONS"))
+    f.write(recordSetting("OPT_COLLECT_DELETE_AFTER"))
+    f.write(recordSetting("MAX_COLLECT_SIZE"))
+    f.write(recordSetting("FILE_NAME_ESCAPE_PATTERN"))
+    # TODO: naming convention
+    f.write(recordSetting("OPT_INCLUDE_MODE",nil,Backup.get_config("OPT_INCLUDE_DIRS_MODE")))
+    f.write(recordSetting("CRYPT_KEYS", "# The selection criteria for the backup encryption keys"))
+    #TODO
+    f.write(recordSetting("lCryptKeyId", "# The public key actually used to encrypt the backup. It is recorded in $lSettingsFile.cryptkey.asc"))
+    f.write(recordSetting("lSourceDir","# The source directory actually used for this backup"))
+    f.write(recordSetting("lTargetDir","# The target directory actually used for this backup"))
+  }
+  open("#{Backup.get_config("lSettingsFile")}.cryptkey.asc","w") {|f| f.write Backup.get_config("lCryptKeyContent")}
+end
+
+def makedir_perms(path)
+  # create a directory with all non-existing
+  # superordinate directories the trouble is,
+  # for the preexisting directories ownership 
+  # and permissions must not be changed, while
+  # for the newly existing part, they must be
+  # changed. so we do this in a loop through 
+  # the slashes
+  $log.debug{"Makedir perms '#{path}'"}
+
+  path = Pathname.new(removeDoubleSlashes(path))
+  if path.exist?
+    # path already exist. do nothing.
+  else
+    dirname,basename = Pathname.new(path).split    
+    # ensure that parent path exist
+    makedir_perms(dirname)
+    # create directory
+    
+    # ##TODO## maybe directly with permission    path.mkdir(:mode => 0700)
+    $log.debug{"Creating directory #{path.to_s}"}
+    path.mkdir #(:mode => 0700)
+    
+    change_perms(path.to_s)
+  end
+end
+
+
+def change_perms(file, recursive = false)
+  $log.debug{"Changing permissions of '#{file}'."}
+  file = Pathname.new(file)
+
+  perms = nil
+  raise "'#{file}' is neither a file nor a directory, will not change ownership." if
+    !file.directory? and !file.file?
+  if file.directory?
+    $log.debug("'#{file}' is a directory.")
+    if Backup.get_config("DIR_PERMS_SET") == "true" and
+	Backup.get_config("DIR_PERMS")
+      perms = Backup.get_config("DIR_PEMRS")
+    else
+      $log.debug{"Not changing permissions DIR_PERMS_SET: #{Backup.get_config("DIR_PERMS_SET").inspect} DIR_PERMS: #{Backup.get_config("DIR_PERMS").inspect}"}
+    end
+  end
+  if file.file?
+    $log.debug("'#{file}' is a file.")
+    if Backup.get_config("FILE_PERMS_SET") == "true" and 
+	Backup.get_config("FILE_PERMS")
+      perms = Backup.get_config("FILE_PEMRS")
+    else
+      $log.debug{"Not changing permissions FILE_PERMS_SET: #{Backup.get_config("FILE_PERMS_SET").inspect} FILE_PERMS: #{Backup.get_config("FILE_PERMS").inspect}"}     
+    end
+  end
+  
+  user = nil
+  group = nil
+  if  Process.uid == 0 and 
+      Backup.get_config("IDENT_USER_SET") == "true" and
+      Backup.get_config("IDENT_USER_BACKUP")
+    user = Backup.get_config("IDENT_USER_BACKUP") 
+  else
+    $log.debug("Not changing directory owner UID: #{Process.uid} IDENT_USER_SET: #{Backup.get_config("IDENT_USER_SET").inspect} IDENT_USER_BACKUP: #{Backup.get_config("IDENT_USER_BACKUP").inspect}")      
+  end
+  if Backup.get_config("IDENT_GROUP_SET") == "true" and
+      Backup.get_config("IDENT_GROUP_BACKUP")
+    group = Backup.get_config("IDENT_GROUP_BACKUP")
+  else
+    $log.debug("Not changing directory group IDENT_GROUP_SET: #{Backup.get_config("IDENT_GROUP_SET").inspect} IDENT_GROUP_BACKUP: #{Backup.get_config("IDENT_GROUP_BACKUP").inspect}")
+    
+  end
+  
+  if perms
+    $log.debug{"Setting permissions of '#{file.to_s}' to #{perms.to_i}"}
+    file.chmod(perms.to_i)
+  end
+
+  if user or group
+    $log.debug {"Changing ownership of '#{file.to_s}' to user #{user.inspect} and group #{group.inspect}"}
+    FileUtils.chown_R(user, group, file.to_s)
+  end
+ 
+end
+
+def recordStartTime 
+  open(Backup.get_config("lSettingsFile"),"a") {|f|
+    f.write(recordSetting("StartTime", "# Time when backup run was started (format: year-month-day-hour-minute-second). There needs to be a \"FinishTime\", otherwise the backup was not finished", Backup.get_config("START_TIME")))
+  }
+end
+  
+def recordFinishTime 
+  open(Backup.get_config("lSettingsFile"),"a") {|f|
+#    f.write(recordSetting("lTotalDirsFound","# Total number of direcotries (after filtering)"))
+#    f.write(recordSetting("lTotalInputCount","# Total number of input files"))
+#    f.write(recordSetting("lTotalOutputCount","# Total number of output files"))
+#    f.write(recordSetting("lTotalCountReduction","# Total reduction in number of files (%)"))
+#    f.write(recordSetting("lTotalInputSize","# Total size of input files (KiB)"))
+#    f.write(recordSetting("lTotalOutputSize" , "# Total size of output files (KiB)"))
+#    f.write(recordSetting("lTotalSizeReduction","# Total reduction in size (%)"))
+
+    f.write(recordSetting("FinishTime","# Time when backup was finished (format: year-month-day-hour-minute-second). ",Backup.get_config("FINISH_TIME")))
+  }
+  ##TODO##     if [ -s "$LOG_FILE" ] ; then
+  ##TODO##         change_perms "$LOG_FILE"
+  ##TODO##         cat "$LOG_FILE" > "$lSettingsFile.log"
+  ##TODO##         change_perms "$lSettingsFile.log"
+  ##TODO##     fi
+  ##TODO##     if [ -s "$LOG_ERROR_FILE" ] ; then
+  ##TODO##         # TODO: should take care of /proc in a better way.
+  ##TODO##         # The code below doesn't work with current logging practices and is an ugly hack...
+  ##TODO##         #cat "$LOG_ERROR_FILE" > "$TMPDIR/$LOG_ERROR_FILE.tmp"
+  ##TODO##         #grep -v "find: /proc/.*: No such file or directory" < "$TMPDIR/$LOG_ERROR_FILE.tmp" | grep -v "rm: cannot remove directory \'$BACKUP_ROOT\'"> "$LOG_ERROR_FILE"
+  ##TODO##         #rm -f "$TMPDIR/$LOG_ERROR_FILE.tmp"
+  ##TODO##         if [ -e "$LOG_ERROR_FILE" ] ; then
+  ##TODO##           change_perms "$LOG_ERROR_FILE"
+  ##TODO##           cat "$LOG_ERROR_FILE" > "$lSettingsFile.error.log"
+  ##TODO##           change_perms "$lSettingsFile.error.log"
+  ##TODO##           echo "$(wc -l < "$LOG_ERROR_FILE") lines in error file "
+  ##TODO##           echo "  $LOG_ERROR_FILE or "
+  ##TODO##           echo "  $lSettingsFile.error.log"
+  ##TODO##         fi
+  ##TODO##     fi
+  ##TODO## 
+  # change permissions for all settings files
+  ##TODO##     for lCPFile in $lSettingsFile* ; do
+  ##TODO##         change_perms "$lCPFile"
+  ##TODO##     done
+end
+
+def log_indent(title, value)
+  $log.info(title)
+  (value or "").split("\n").each {|line|
+    $log.info("  #{line}")
+  }
+end
+
+def show_summary 
+  $log.info{"Backup Summary"}
+  $log.info{"--------------"}
+  $log.info{"Host:       #{Backup.get_config("HOST")}"}
+  case Backup.get_config("OPT_MODE")
+  when "diff"
+    $log.info("Mode:       Differential to #{Backup.get_config("OPT_SINCE")}")
+  when "incr"
+    $log.info("Mode:       Incremental to #{Backup.get_config("OPT_SINCE")}")
+  when "full"
+    $log.info("Mode:       Full backup")
+  else
+    raise "unexpected mode #{Backup.get_config("OPT_MODE")}"
+  end
+
+  $log.info("Set:        #{Backup.get_config("OPT_SET")}")
+  $log.info("To:         #{Backup.get_config("lTargetDir")}")
+  $log.info("Format:     #{Backup.get_config("OPT_PACKMETHOD")}")
+  if Backup.get_config("CMD_CRYPT")
+    $log.info{"Encryption: #{Backup.get_config("CMD_CRYPT")} for keys #{Backup.get_config("lCryptKeyName")}"}
+  else
+    $log.info{"Encryption: none"}
+  end
+  log_indent("Include dirs:", Backup.get_config("OPT_INCLUDE_DIRS"))
+  log_indent("Exclude dirs:", Backup.get_config("OPT_EXCLUDE_DIRS"))
+  log_indent("Include files:", Backup.get_config("OPT_INCLUDE_FILES"))
+  log_indent("Exclude files:", Backup.get_config("OPT_EXCLUDE_FILES"))
+  log_indent("Separate dirs:", Backup.get_config("OPT_SEPARATE_DIRS"))
+end
+
+def add_statistic(key, value)
+  $statistics ||= {}
+  $statistics[key] = 0 unless $statistics[key]
+  val = 0
+  case value.class.name
+  when /PathList$/
+    val = value.length
+  when "NilClass"
+  when "Fixnum", "Float", "Bignum"
+    val = value
+  else
+    raise "Unknonw class to add #{value.class.name}"
+  end
+
+  $log.debug{"Adding #{val} to #{key} statistic"}
+  $statistics[key] += val
+end
+
+def show_statistics 
+  return unless $log.info?
+  $log.info("Backup Statistics:")
+  $log.info("------------------")
+  get_statistics.each {|line|
+    $log.info(line.strip)
+  }
+end
+
+def save_statistics(file)
+  Pathname.new(file).open("w") {|f|
+    get_statistics.each {|line|
+      f.write(line)
+    }
+  }
+end
+
+def get_statistics
+  ret = ""
+  key_length = $statistics.keys.map {|k| k.to_s.length}.max
+  $statistics.keys.sort_by{|k| k.to_s}.each {|key|
+    stat = "#{key.to_s.ljust(key_length)}: "
+    case key.to_s
+    when /reduction/
+      stat += "%4.1f %" % $statistics[key]
+    when /size$/
+      stat += "#{$statistics[key]} bytes"
+    else
+      stat += "#{$statistics[key]}"
+    end
+    ret += stat + "\n"
+  }  
+  ret
+end
+
+def save_settings 
+  FileUtils.copy(Backup.get_config("ISIBACKUP_CONFIG"),target_file("isibackup/isibackup.conf"))
+
+  if Backup.get_config("OPT_SET")
+    FileUtils.copy(Backup.get_config("SET_CONFIG"), target_file("isibackup/set.conf"))
+   
+    open(target_file("isibackup/include_dirs.lst"),"w") {|f| f.write(Backup.get_config("OPT_INCLUDE_DIRS")) }
+    open(target_file("isibackup/exclude_dirs.lst"),"w") {|f| f.write(Backup.get_config("OPT_EXCLUDE_DIRS")) }
+    open(target_file("isibackup/include_files.lst"),"w") {|f| f.write(Backup.get_config("OPT_INCLUDE_FILES")) }
+    open(target_file("isibackup/exclude_files.lst"),"w") {|f| f.write(Backup.get_config("OPT_EXCLUDE_FILES")) }
+    open(target_file("isibackup/separate_dirs.lst"),"w") {|f| f.write(Backup.get_config("OPT_SEPARATE_DIRS")) }
+  end
+end
+
+
+def do_pack
+  $log.debug("Packing method '#{Backup.get_config("CMD_PACK")}'")
+  cmd = nil
+  case Backup.get_config("CMD_PACK")
+  when "cpio"
+    #    cmd = "cpio --create 2>> $LOG_SKIPPED_FILE"
+    cmd = "cpio --create --quiet"
+  when "tar"
+    lTarOptions = "--sparse --absolute-names --no-recursion --atime-preserve"
+    #    cmd = "tar --create #{lTarOptions} --files-from - 2>> $LOG_FILE"
+    cmd = "sed 's/^\-/--add-file=-/' | tar --create #{lTarOptions} --files-from -"
+  when "zip"
+    #    cmd ="zip -y -@ - 2>> $LOG_FILE"
+    cmd ="zip -y -@ -"
+  else
+    raise "unsupported CMD_PACK #{Backup.get_config("CMD_PACK")}"
+  end
+  
+  $log.debug{"Using pack method: #{cmd.inspect}"}
+  cmd
+end
+
+def do_compress 
+  $log.debug("Compressing '#{Backup.get_config("CMD_COMPRESS")}'")
+  cmd = nil
+  case Backup.get_config("CMD_COMPRESS")
+  when "bzip2"
+    #    cmd = "bzip2 --compress --stdout 2>> $LOG_FILE"
+    cmd = "bzip2 --compress --stdout"
+  when "gzip"
+    #    cmd = "gzip --stdout 2>> $LOG_FILE"
+    cmd = "gzip --stdout"
+  when "zip"
+    #    cmd = "zip 2>> $LOG_FILE"
+    cmd = "zip"
+  when nil
+    # dont use a compressor
+  else
+    raise "unsupported CMD_COMPRESS #{Backup.get_config("CMD_COMPRESS")}"
+  end
+  $log.debug{"Using: #{cmd.inspect}"}
+  cmd
+end
+
+def do_encrypt 
+  $log.debug("Encrypting '#{Backup.get_config("CMD_COMPRESS")}'")
+  cmd = nil
+  case Backup.get_config("CMD_CRYPT")
+  when "gpg"
+    #    cmd = "eval gpg #{Backup.get_config("Recipient_Flags")} --batch --encrypt"
+    cmd = "gpg #{Backup.get_config("Recipient_Flags")} --batch --encrypt"
+  when nil
+    # dont use a crypter
+  else
+    raise "unsupported CMD_CRYPT #{Backup.get_config("CMD_CRYPT")}"
+  end
+  $log.debug{"Using: #{cmd.inspect}"}
+  cmd
+end
+
+def do_pack_compress_encrypt(source_dir, source_files, target_file)  
+  pmsg("Create", target_file)
+
+  target_file = Pathname.new(target_file)
+  if $log.debug?
+    $log.debug("Backing '#{source_dir}' up:")
+    source_files.each {|f| $log.debug("  #{f.to_s}")}
+    source_files.seek(0) if source_files.respond_to?(:seek)
+    $log.debug("to #{target_file}")
+  end
+
+  makedir_perms(target_file.dirname.to_s)
+  
+  command = [do_pack, do_compress, do_encrypt].compact.join(" | ")
+  tmp_target_file = Pathname.new("#{target_file}.new")
+
+  FileUtils.rm(tmp_target_file) if tmp_target_file.exist?
+
+  iterator = source_files
+  if source_files.class.name=="PathList"
+    iterator = PathlistIteratorBannIfNotExist.new(source_files, lambda {
+						add_statistic(:file_escaped, 1)
+						$log.skipped("File disappeared while create backup file: #{$!}")						 })
+  end
+  
+  ignore_errors =  {
+    :info => [/cpio\: File .* grew, .* new bytes not copied/],
+    :recreate => [/cpio\: File .* was modified while being copied/]
+  }
+
+  rec_count = 0
+  while (logs =
+	 execute_command_popen3(command, iterator, source_dir,tmp_target_file,ignore_errors).select {|action, regexp, line| action == :recreate}).length > 0
+    $log.warn("Recreating target file because: #{logs.map {|action,regexp,line| line.inspect}.join(",")}")
+    raise "Max recreate count #{rec_count} reached, giving up." if rec_count == 10
+    rec_count += 1
+    FileUtils.rm(tmp_target_file) 
+  end
+
+  FileUtils.rm(target_file) if target_file.exist?
+  FileUtils.mv(tmp_target_file,target_file)
+  
+  $log.debug("File '#{target_file}' creating finished.")
+  target_file
+rescue
+  # TODO: Ensure that this rescue does not have any effect
+  #       to further backup runs meanst, that this directory
+  #       will be backed up later again.
+  $log.error("Error backing up #{source_dir}: #{$!}")
+  $!.backtrace.each {|l| $log.debug(l)} if $log.debug?    
+  $error_ocurred = true
+  return nil
+end
+
+#def do_backup(source_dir, file_list, target_dir, pack_mode, target_name = nil, force = false)
+def do_backup(source_root, target_root, directory, file_list, pack_mode, target_name = nil, force = false)
+  size = 0
+  count = 0
+  directory = Pathname.new(".") if directory.nil?
+  source_dir = source_root + directory
+  case pack_mode.to_s
+  when /collect.*/
+    bf = backup_file(target_root, pack_mode, directory, target_name).to_s
+    out_file = do_pack_compress_encrypt(source_dir, file_list, bf)
+    if out_file
+      file_list.each {|e| 
+	e.backup_file = bf
+      }      
+      size += File.lstat(out_file).size
+      count += 1
+      # removing old backup files from other packagings or cyphers
+      remove_old_backup_files(target_root, pack_mode, directory, target_name)
+    end
+  when "separate"
+    file_list.each {|f|
+      bf = backup_file(target_root, pack_mode, directory, f.to_s).to_s
+      out_file = do_pack_compress_encrypt(source_dir, [f], bf)
+      if out_file
+	f.backup_file = f
+	size += File.lstat(out_file).size
+	count += 1
+	# removing old backup files from other packagings or cyphers
+	remove_old_backup_files(target_root, pack_mode, directory, f.to_s)
+      end
+    }
+  else
+    raise "unexpected pack mode '#{pack_mode}'."
+  end
+  
+  file_list.close if file_list.respond_to?(:close)
+  [count, size]
+end
+
+def do_copy_collect(from_host, from_path, to_host, to_path, options = {})
+  $log.info("Copy/Collect from #{from_host or "localhost"}:#{from_path} to #{to_host or "localhost"}:#{to_path}")
+
+  from_host = nil if from_host == "localhost"
+  to_host = nil if to_host == "localhost"
+  
+  copier = (options[:copier] or "rsync")
+  raise "only copier rsync allowed" if copier != "rsync"
+  check_copier copier
+  
+  case copier
+  when "rsync"
+    rsync_options = Backup.get_config("OPT_RSYNC_OPTIONS","")
+    if Backup.get_config("DIR_PERMS_SET") == "true" or Backup.get_config("FILE_PERMS_SET") == "true" then
+      rsync_options += " --perms"
+    end
+    
+    rsync_options += " --perms #{Backup.get_config("OPT_RSYNC_ADD_OPTIONS")}"
+    rsync_options += " --rsh=\"ssh -i #{Backup.get_config("USER_BACKUP_HOME")}/.ssh/id_dsa\""    
+  else
+    raise "Unexpected copier #{copier}"
+  end
+
+  from_login, to_login = "", ""  
+  unless Backup.get_config("NO_RSYNC_LOGIN_FOR_TEST") == "true"
+    from_login = "#{Backup.get_config("OPT_REMOTE_USER")}@#{from_host}:" if from_host
+    to_login = "#{Backup.get_config("OPT_REMOTE_USER")}@#{to_host}:" if to_host
+  end
+
+  if to_login == ""
+    # the target is local, create directories
+    $log.info("Creating target directories in #{to_path} on localhost.")
+    makedir_perms "#{to_path}"          
+    makedir_perms "#{to_path}/state/" if $collects.include?(:state)
+  end
+
+  $log.debug("From login: #{from_login.inspect}")
+  $log.debug("To login: #{to_login.inspect}")
+
+  fqdn = "#{Backup.get_config("OPT_HOST")}.#{Backup.get_config("OPT_NET")}"
+  
+  if $collects.include?(:state)
+    includes = [
+      "/#{fqdn}.log",
+      "/#{fqdn}-#{Backup.get_config("OPT_REMOTE_SET")}-#{Backup.get_config("OPT_REMOTE_MODE")}.date"
+    ]
+    
+    do_rsync("#{from_login}#{from_path}/state/","#{to_login}#{to_path}/state/",includes, ["/*"], rsync_options)
+  end
+  
+  if $collects.include?(:content)
+    rsync_options += " --prune-empty-dirs"
+    
+    includes = ["/#{Backup.get_config("OPT_REMOTE_SET")}/"]
+    includes << "/state/"
+    includes << "/*/*/"
+    includes << "/*/*/*/"
+    includes << "/*/*/*/*/"
+    includes << "/*/*/*/*/*/"
+    
+    case Backup.get_config("OPT_REMOTE_MODE")
+    when "full"
+      includes.push("/#{Backup.get_config("OPT_REMOTE_SET")}/full/#{Backup.get_config("OPT_NET")}/#{Backup.get_config("OPT_HOST")}/**")
+    when "diff", "incr"
+      includes.push("/#{Backup.get_config("OPT_REMOTE_SET")}/#{Backup.get_config("OPT_REMOTE_MODE")}/#{Backup.get_config("OPT_NET")}/*/#{Backup.get_config("OPT_HOST")}/**")
+    else
+      includes.push("/#{Backup.get_config("OPT_REMOTE_SET")}/full/#{Backup.get_config("OPT_NET")}/#{Backup.get_config("OPT_HOST")}/**")
+      includes.push("/#{Backup.get_config("OPT_REMOTE_SET")}/diff/#{Backup.get_config("OPT_NET")}/*/#{Backup.get_config("OPT_HOST")}/**")
+      includes.push("/#{Backup.get_config("OPT_REMOTE_SET")}/incr/#{Backup.get_config("OPT_NET")}/*/#{Backup.get_config("OPT_HOST")}/**")
+      
+    end
+    lInExclude = includes.map {|incl| "--include \"#{incl}\""}.join(" ")
+    do_rsync("#{from_login}#{from_path}/","#{to_login}#{to_path}/", includes, ["*"], rsync_options)
+  end
+  
+  if Backup.get_config("OPT_COLLECT_DELETE_AFTER") == "true"
+    raise "Delete after not implemented."
+    ssh #{login} "rm -rvf '$OPT_REMOTE_PATH'" > "$FILE_RSYNC_LOG"
+  end
+end
+
+# Main program
+# ------------
+
+$action = nil
+$collects = [:state, :content]
+$log_level = 3
+$write_debuglog = false
+
+arguments = optparse {|o|
+  
+  # general options
+  o.on("-b", "--backup","Do backup.") do 
+    $action = :backup 
+  end
+  o.on("-C", "--collect","get backups (poll / download). uses the --remote-* values") do 
+    $action = :collect
+  end
+  o.on("-c", "--copy","copy backup (push / upload). uses the --remote-* values") do 
+    $action = :copy
+  end
+  o.on("-V", "--version","show version") do 
+    $action = :version
+  end
+  o.on("-a","--archive <path>","save collected backups to <path>") do |a|
+    Backup.set_config("OPT_ARCHIVE",a)
+  end
+  o.on("-c","--config <file>") do |a|
+    Backup.set_config("ISIBACKUP_CONFIG",a)
+  end
+  o.on("--configdir <path>","load configfiles from there instead of /etc/isibackup") do |a| 
+    Backup.set_config("ISIBACKUP_CONFIGDIR",a)
+  end
+  o.on("-k","--key <ident>","use pgp key <ident> (multiple times usable more than one key)") do |a|
+    Backup.set_config("CRYPT_KEYS_cmdln",a)
+  end
+  o.on("--dont-remove-old","Dont remove old backup files, faster") do |a|
+    Backup.set_config("DONT_REMOVE_OLD_BACKUPS","true")
+  end
+  o.on("--dont-compare-to-old","Dont find changes with old dirlist, slower. This is also enabled if last full backup aborted or no full backup exist.") do |a|
+    Backup.set_config("DONT_COMPARE_TO_OLD","true")
+  end
+  o.on("--skip-pre-commands","Dont execute pre backup commands") do |a|
+    Backup.set_config("SKIP_PRE_COMMANDS","true")
+  end
+  o.on("--write-debuglog","writes a debuglogfile in the default logdir.") do 
+    $write_debuglog = true
+  end
+  o.on("-l","--log <file>","log all actions to <file>") do |a|    
+    Backup.set_config("LOG_FILE",a)
+  end
+  o.on("--logdir <path>","save logfiles there") do |a|
+    Backup.set_config("LOG_DIR",a)
+  end
+
+  # backup options
+  o.on("-D","--diff","differential backup") do Backup.set_config("OPT_MODE","diff") end
+  o.on("-I","--incr","incremental backup") do Backup.set_config("OPT_MODE", "incr") end
+  o.on("-F","--full","full backup") do  Backup.set_config("OPT_MODE", "full") end
+  o.on("-s","--set <ident>","set ident. specified by config files in /etc/isibackup/<ident>") do |set|
+    Backup.set_config("OPT_SET",set)
+  end
+
+  o.on("--recreate-archive","deletes the directory for the actual backup and recreates it.") do |a|
+    Backup.set_config("OPT_RECREATE_ARCHIVE","true")
+  end
+
+  o.on("--dir-numbering","number dirs with differential/incremental backups, ignored if --copy or --full is set. use this only for testing purposes!") do |a|
+    Backup.set_config("OPT_DIRNUMBERING","true")
+  end
+
+  # collect options
+  o.on("--collect-state","same as --collect, but only collects state logs") do
+    $action = :collect
+    $collects = [:state]
+  end
+  o.on("--collect-content","same as --collect, but only collect backups") do
+    $action = :collect
+    $collects = [:content]
+  end
+  o.on("-y","--collect-delete-after","delete source after collecting it (dangerous!)") do
+    Backup.set_config("OPT_COLLECT_DELETE_AFTER","true")
+  end
+
+  o.on("--net <net>","collect only backups for net") do |a|
+    Backup.set_config("OPT_NET",a)
+  end
+  o.on("--host <host>","collect only backups for host") do |a|
+    Backup.set_config("OPT_HOST",a)
+  end
+  
+  o.on("-H","--remote-host <host>","host for copy and collect") do |a|
+    Backup.set_config("OPT_REMOTE_HOST",a)
+  end
+  o.on("-r","--remote-method <method>","method to use for copy and collect") do |a|
+    Backup.set_config("OPT_REMOTE_METHOD",a)
+  end
+  o.on("-p","--remote-password <password>","password for copy and collect") do |a|
+    Backup.set_config("OPT_REMOTE_PASSWORD",a)
+  end
+  o.on("-A","--remote-password-file <file>","file containing password for copy and collect") do |a|
+    Backup.set_config("OPT_REMOTE_PASSWORD",open(a,"r") {|f| f.readline.strip})
+  end
+  o.on("-P","--remote-path <path>","path for copy and collect") do |a|
+    Backup.set_config("OPT_REMOTE_PATH",a)
+  end
+  o.on("-u","--remote-user <ident>","user for copy and collec") do |a|
+    Backup.set_config("OPT_REMOTE_USER",a)
+  end
+  o.on("--remote-set <set>","collect only set backups") do |a|
+    Backup.set_config("OPT_REMOTE_SET",a)
+  end
+  o.on("--remote-mode <mode>","collect only mode backups") do |a|
+    Backup.set_config("OPT_REMOTE_MODE",a)
+  end
+  o.on("-R","--rsync-add-option <option>","additional option to pass to rsync (for copy and collect commands)") do |a|
+    Backup.set_config("OPT_RSYNC_ADD_OPTIONS",Backup.get_config("OPT_RSYNC_ADD_OPTIONS","") + " #{a}")
+  end
+}
+
+
+def lmtime(file)
+  # uses mtime of links
+  File.lstat(file.to_s).mtime
+end
+  
+  #### REST OPTIONS FROM isibackup 1.8
+  
+  ##TODO##     echo "	-x	--other-filesystems		backup files on other filesystems/mounted devices."
+
+  ##TODO##     echo "	-i	--since <date>			differential since <date>"
+  ##TODO##     echo "		--no-dir-renewal		don't recreate directories with only new timestamp"
+  ##TODO##     echo
+  ##TODO##     echo "Report bugs to bugs@isibackup.org"
+  
+  ##TODO##             -x|--other-filesystems) OPT_FILESYSTEMS="true";  shift ;;
+  ##TODO##             -q|--quiet) LOG_MASK_CONSOLE=$LOG_NONE; shift ;;
+  ##TODO##             -R|--rsync-add-option) ; shift 2 ;;
+  ##TODO##             -i|--since) OPT_SINCE="$2"; shift 2 ;;
+  ##TODO##             --no-dir-renewal) OPT_NO_DIR_RENEWAL="true"; shift ;;
+  ##TODO##             -v|--verbose) LOG_MASK_ERROR="$LOG_MASK_ERROR $LOG_VERBOSE";OPT_SHOW_PROGRESS="true"; shift ;;
+  ##TODO##             --) shift; break ;;
+  ##TODO##             *)  log "The commandline parsing failed. '$@'" $LOG_FATAL ;;
+  
+  
+  ## do we really need this?
+  ##TODO##     if [ "$#" -gt 0 ] ; then
+  ##TODO##         OPT_INCLUDE_DIRS="$@"
+  ##TODO##     fi
+  ##TODO## 
+  
+  
+  def do_version
+    # TODO print version (like in libisi)
+  end
+
+
+begin
+  
+  do_version
+  exit 0 if ($action == :version)
+  
+  #mainly loads configuration
+  init_program
+  
+  Backup.set_config("START_TIME", DateTime.now.strftime("%F %T"))
+  $log.info { "started at: #{Backup.get_config("START_TIME")}"}
+  
+  setNewStamp("started")
+  
+  case $action
+  when :backup
+    $exit_mode = "safe"
+
+    raise "lDirListFName undefined." unless Backup.get_config("lDirListFName")
+    raise "lFileListFName undefined." unless Backup.get_config("lFileListFName")
+    raise "TMPDIR undefined." unless Backup.get_config("TMPDIR")
+
+    Backup.set_config("lFileDirs",(Pathname.new(Backup.get_config("TMPDIR")) + Backup.get_config("lDirListFName")).to_s)
+    Backup.set_config("lFileListTmpFName","#{Backup.get_config("TMPDIR")}/#{Backup.get_config("lFileListFName")}")
+    tmp_file_list = Pathname.new(Backup.get_config("lFileListTmpFName"))
+    tmp_full_file_list = Pathname.new(Backup.get_config("lFileListTmpFName") + ".full")
+    filtered_dir_list_file = Pathname.new("#{Backup.get_config("lFileDirs")}.filtered")
+    
+
+    separate_regexps = Backup.get_config("OPT_SEPARATE_DIRS","").split("\n").map {|separate_str|Regexp.new(separate_str)}
+    Backup.set_config("lSourceDir",Backup.get_config("lSourceDir","/"))
+    source_dir = Pathname.new(Backup.get_config("lSourceDir")).realpath
+    $log.info("Doing backup of '#{Backup.get_config("lSourceDir")}")
+    
+    $log.debug {"Getting lock."}
+    checkLock
+    
+    $log.debug {"Checking packer."}
+    checkPacker
+    $log.debug {"Checking crypter."}
+    checkCrypter
+    checkCryptedBackup
+    
+    # get the target directory for this backup
+    lTargetDir = Backup.set_config("lTargetDir",getPathBackup(Backup.get_config("OPT_MODE")))
+    $log.info("Target dir is now '#{lTargetDir}'")
+    makedir_perms(Pathname.new(lTargetDir).join("isibackup").to_s)
+    
+    # get the date of the last backup of this type and set start date if differential backup
+    backup = Backup.new(Backup.get_config("OPT_SET"),
+			:backup_root => lTargetDir,
+			:state_path => Backup.get_config("PATH_STATE"),
+			:dir_numbering => (Backup.get_config("OPT_DIRNUMBERING") == "true"),
+			:dir_with_time => (Backup.get_config("OPT_DIRWITHTIME") == "true"))
+
+    current_runs = backup.get_latest_completed_runs
+    if (current_runs[0] or {})[:mode] != "full" and Backup.get_config("OPT_MODE") != "full"
+      if Backup.get_config("AUT_FULL") == "true"
+	$log.warn{"Creating a full backup now."}
+	Backup.set_config("OPT_MODE", "full")
+      else
+	raise "No completed full backup found. You need to create a full backup first or set AUTO_FULL=true in your config file."
+      end
+    end
+    if Backup.get_config("OPT_MODE") == "full"
+      reference_backup = backup.latest_full
+    else
+      reference_backup = backup.latest
+    end
+    Backup.set_config("OPT_SINCE", reference_backup[:start_time]) if reference_backup
+
+    # if differential mode, add option to find to restrict list to newer files; 
+    # use temporary differential reference file
+    if Backup.get_config("OPT_SINCE")
+      execute_command('touch -d "$OPT_SINCE" "$TMPDIR/$lDiffRefFName"')
+      reference_time = Time.parse(Backup.get_config("OPT_SINCE")) 
+      $log.info{"Setting reference time to: #{reference_time.strftime("%F %T")}"}
+    else
+      $log.debug{"OPT_SINCE not set, no reference_time"}
+    end
+  
+    latest_dirlist = backup.get_latest_dirlist(Backup.get_config("OPT_MODE")=="full")
+    raise "Dirlist found but no reference time set!" if latest_dirlist and reference_time.nil?
+    raise "Dirlist not found." if Backup.get_config("OPT_MODE") != "full" and latest_dirlist.nil?
+    
+    init_backup_log
+    $log.info{"Reference time: #{reference_time}"}
+    $log.info("Using latest dirlist '#{latest_dirlist.source_file}'") if latest_dirlist
+    $log.warn("No dirlist but reference time defined.") if latest_dirlist.nil? and reference_time
+
+    load_set_lists
+    show_summary
+    save_settings
+    # record information about backup in target directory
+    Backup.set_config("lSettingsFile",target_file("isibackup/settings.conf"))
+    FileUtils.touch(Backup.get_config("lSettingsFile"))
+    
+    recordBackupSettings
+    recordStartTime
+    
+    # create list of directories to be backed up
+    if progress_bar_enabled?
+      $log.info("Backup Progress")
+      $log.info("---------------")
+    end
+    
+    $log.debug{"Changing to source directory '#{source_dir}'"}
+    working_dir = FileUtils.pwd
+    FileUtils.cd(source_dir)
+
+    source_dir = Pathname.new(Backup.get_config("lSourceDir")).realpath
+    target_dir = Pathname.new(Backup.get_config("lTargetDir")).realpath
+
+    # create list of directories to backup. result is inside file filtered_dir_list
+    dir_list = createDirList(source_dir.to_s,filtered_dir_list_file, latest_dirlist)
+    add_statistic(:directories_total, dir_list)
+    removeOldBackupDirs(target_dir, dir_list) if Backup.get_config("DONT_REMOVE_OLD_BACKUPS") != "true"
+         
+    to_backup = dir_list
+
+    if Backup.get_config("DONT_COMPARE_TO_OLD") == "true" and latest_dirlist
+      $log.warn("Old dirlist found, but skipping comparison due to command line options.")
+      latest_dirlist = nil
+    end
+
+    if latest_dirlist
+      $log.debug{"Looking for directories to backup."}
+      progress_bar("FindChanges", dir_list.length) {
+	to_backup = dir_list.select(latest_dirlist) {|current, old|
+	  pinc("Checking",current)	  
+	  if old	
+	    begin
+	      eql = (current.stat[:ctime] == old.stat[:ctime])
+	      $log.debug{"Backup and orig ctime of '#{current.to_s}' are: #{current.stat[:ctime]} == #{old.stat[:ctime]}: (#{eql})"}
+	      
+	      pn = current.pathname
+	      newer_file = nil
+	      if reference_time
+		newer_file = pn.each_entry {|entry|
+		  begin
+		    next if entry.to_s == ".." or entry.to_s == "."    
+		    entry = pn + entry
+		    next if !entry.symlink? and entry.directory?
+		    cmp = entry.lstat.ctime > reference_time
+		    $log.debug{"entry(#{entry.lstat.ctime}) >= reference_time(#{reference_time}): #{cmp}"}
+		    break(entry) if cmp
+		  rescue Errno::ENOENT
+		    raise $! if entry.exist?
+		    next
+		  end      
+		}
+		$log.debug("Entry '#{newer_file}'s ctime '#{newer_file.lstat.ctime}' in '#{current.pathname}' is after reference time '#{reference_time}'") if newer_file
+	      end	      
+	      
+	      if !eql or newer_file 
+		add_statistic(:directories_changed, 1)
+		true
+	      else
+		add_statistic(:directories_unchanged, 1)
+		false
+	      end	
+	    rescue Errno::ENOENT
+	      add_statistic(:directories_escaped, 1)
+	      $log.skipped("Directory disappeared while find changes: #{$!}")
+	      false
+	    end      
+	  else
+	    $log.info{"New directory found '#{current}'"}
+	    add_statistic(:directories_new, 1)
+	    true
+	  end
+	}      
+      }
+    else
+      $log.debug{"No old dirlist found."}
+    end
+
+    raise "Filtered list '#{filtered_dir_list_file}' was not created." unless filtered_dir_list_file.exist?
+
+    if Backup.get_config("SKIP_PRE_COMMANDS") == "true"
+      $log.warn("Skipping pre backup commands.")
+    else
+      $log.info("Going to execute PRE_BACKUP_COMMANDS.")
+      
+      # if there are pre-backup-commands, evaluate them now
+      # YOU MAY NOT CREATE NEW DIRECTORIES, THEY WILL NOT BE BACKED UP
+      #set -e
+      if (pbc = Backup.get_config("BACKUP_PRE_CMDS"))
+	$log.debug{"BACKUP_PRE_CMDS: #{pbc}"}
+	FileUtils.cd(working_dir) {
+	  execute_command_popen3(pbc)
+	}	
+      else
+	$log.debug("No prebackup command defined.")
+      end
+      #set +e
+    end
+
+    # now: normally, isibackup does just save files, and depending on the pack
+    # algorithm it stores them with ownerships and attributes. however, we will
+    # lose exactly that information for all directories. in order to save that
+    # information, too, we need the directory list to be the file list to be
+    # backed up additionally. we do so by appending a special entry to the
+    # directory list (kind of escape entry), which, when reached, has the
+    # directory list as its predefined files list. in order not to backup all
+    # files insided those directories once again, we have to make sure the
+    # pack algorithm uses the right parameters to back them up without their
+    # content.
+
+    Backup.set_config("lTotalInputCount","0")
+    Backup.set_config("lTotalInputSize","0")
+    Backup.set_config("lTotalOutputCount","0")
+    Backup.set_config("lTotalOutputSize","0")
+
+    Backup.set_config("lTotalDirsFound",dir_list.readlines.length.to_s)
+    ##TODO##     lPerc=0;
+    ##TODO##     lPercPrev=0;
+
+    is_full_backup = Backup.get_config("OPT_MODE") == "full"
+    remove_old_backups = Backup.get_config("DONT_REMOVE_OLD_BACKUPS") != "true"
+
+    progress_bar("BackingUp", to_backup.length) {
+      $exit_mode = ""
+      # Backup directory list    
+      pmsg("Saving dirlist","#{target_dir}/dirlist.bz2")
+      dir_list.save_list_and_stat(target_dir,"dirlist")
+      pmsg("Saving encrypted dirlist", backup_file(target_dir, "separate",nil,"isibackup.dirlist"))
+      
+      iterator = PathlistIteratorBannIfNotExist.new(dir_list, lambda {
+						      add_statistic(:directory_escaped, 1)
+						      $log.skipped("Directory disappeared while create backup file: #{$!}")						 })
+      do_backup(source_dir,
+		target_dir,
+		nil,
+		iterator,
+		"collect", "isibackup.dirlist", true)
+      
+      # iterate through the list and repeat for each directory    
+      to_backup.each {|lDir|
+	begin
+	  pinc("Backup",lDir)
+	  lDir = lDir.pathname
+	  $log.debug{"Backing up directory '#{lDir}'"}
+	  
+	  old_list = backup.get_latest_filelist_for(encode_path(lDir), target_dir, is_full_backup)
+	  full_file_list = createFileList(source_dir + lDir,tmp_full_file_list) 
+	  
+	  pmsg("CountFiles",lDir)
+	  before_clean = full_file_list.length
+	  lTotalSize, lFileCount, lDirCount = sum_and_clean_file_list(full_file_list.temp_file)
+	  raise "File list contains directories, but should not!" if lDirCount > 0
+	  
+	  # Adding values to global count
+	  add_statistic(:files_processed, before_clean)
+	  add_statistic(:total_input_size, lTotalSize)
+	  add_statistic(:total_input_count, lFileCount)
+	  add_statistic(:files_skipped, before_clean - lFileCount)
+	  
+	  if old_list
+	    $log.debug{"Combining #{full_file_list.source_file} and #{old_list.source_file}."}
+	  else
+	    $log.debug{"No old list found."}
+	  end
+
+	  memory_full_file_list = MemoryPathList.new
+	  memory_full_file_list.append(full_file_list)
+
+	  recreate_all = false
+	  ensure_save_file_list = false
+
+	  pmsg("SplitUp",lDir)
+	  file_lists = memory_full_file_list.split_combine(old_list) {|current, old|
+	    begin
+	      $log.debug{"Combine entry #{current} => #{old}"}
+	      # file was removed.
+	      if current.nil?
+		ensure_save_file_list = true if is_full_backup
+		next :removed 
+	      end
+	      
+	      backup_method = backup_mode(current.pathname, lFileCount, lTotalSize)
+
+	      next backup_method if recreate_all
+	    
+	      # new created
+	      if old.nil?	    
+		$log.debug{"No old entry found, new file."}
+		add_statistic(:files_new, 1)
+		next backup_method
+	      end	    
+
+	      if is_full_backup 
+		# save backup file in new list if this
+		# is a full backup
+		unless old.backup_file
+		  # this seems to be an old
+		  # backup directory recreate
+		  # all files again.
+		  $log.warn{"No backup file found in old list in '#{lDir}', recreate whole directory again."}
+		  recreate_all = true
+		  next backup_method
+		else
+		  current.backup_file = old.backup_file
+		end
+	      end
+
+	      old_stat = old.stat
+	      new_stat = current.stat
+	      
+	      if new_stat[:mtime] != old_stat[:mtime]
+		$log.debug{"mtime changed: #{new_stat[:mtime]} == #{old_stat[:mtime]}"}
+		add_statistic(:files_changed, 1)
+		next backup_method
+	      end
+	      
+	      if new_stat[:ctime] != old_stat[:ctime]
+		$log.debug{"ctime changed: #{new_stat[:ctime]} == #{old_stat[:ctime]}"}
+		add_statistic(:files_fileinfo_changed, 1)
+		ensure_save_file_list = false
+	      end
+	      
+	      case backup_method.to_s
+	      when /^(collect.*)/
+		"skipped_#{$1}".to_sym
+	      when "separate"
+		# we do not need to backup this file,
+		# its already in a backup file that 
+		# will not be touched
+		false
+	      else
+		raise "Unexpected backup method: #{backup_method}"
+	      end
+	    rescue Errno::ENOENT
+	      raise $! if current and current.pathname.exist?
+	      add_statistic(:file_escaped, 1)
+	      $log.skipped("File disappeared while finding changes: #{$!}")
+	      next
+	    end      	  
+	  }
+	   	  
+	  collect_names =
+	    (["collect"] + 
+	     file_lists.keys.map {|k| k.to_s =~ /^(collect_.*)$/; $1} +
+	     file_lists.keys.map {|k| k.to_s =~ /^skipped_(collect_.*)$/; $1}).compact.uniq
+	  
+	  collect_names.each {|collect_name|
+	    add_statistic("files_mode_#{collect_name}".to_sym, file_lists[collect_name.to_sym])
+	  }
+	  add_statistic(:files_mode_separate, file_lists[:separate])
+	  add_statistic(:files_unchanged, file_lists[:skipped_collect])
+	  add_statistic(:files_removed, file_lists[:removed])
+
+	  if is_full_backup and remove_old_backups
+	    pmsg("RemoveOld",lDir)
+
+	    if file_lists[:removed]
+	      $log.debug("Removing old backup files.")
+	      file_lists[:removed].each {|p|
+		$log.debug{"Processing '#{p}'"}
+		
+		remove_old_backup_files(target_dir,"separate", lDir, p.pathname.basename, true) {|bf|
+		  # TODO set this to info	      
+		  $log.warn("Removing obsolete target backup file: #{bf.to_s}")
+		  add_statistic(:removed_separate_backup_file, 1)	      
+		}
+	      }
+	    end
+	    
+	    collect_names.each {|collect_name|
+	      if (file_lists[collect_name.to_sym] or []).length == 0
+		$log.debug{"Collect list #{collect_name} is 0 and mode is full."}
+		if (file_lists["skipped_#{collect_name}".to_sym] or []).length == 0
+		  $log.debug{"There are no skipped files to backup."}
+		  # there are no collect backup files anymore.
+		  # We can remove collect backup target file if it exist.
+		  remove_old_backup_files(target_dir, collect_name, lDir, nil, true)
+		else
+		  $log.debug{"There are still skipped files to backup for #{$1}. Leaving backup target file."}
+		end
+	      else	      
+		$log.debug{"Collect list #{collect_name} list non zero and mode is full."}
+		# at least one file must be included in
+		# the backup file. add skipped files
+		file_lists[collect_name.to_sym].append(file_lists["skipped_#{collect_name}".to_sym]) if 
+		  file_lists["skipped_#{collect_name}".to_sym]
+	      end
+	      
+	      $log.debug("Looking for unnecessary separate backup files.")
+	      # if separate file exist, remove this
+	      (file_lists[collect_name.to_sym] or []).each {|entry|
+		$log.debug("Checking #{entry.to_s}.")
+		if remove_old_backups
+		  remove_old_backup_files(target_dir, :separate, lDir, entry.pathname.basename.to_s, true) {|bf|
+		    add_statistic(:backup_files_removed, 1)
+		  }
+		end
+	      }
+	    }
+	  end
+
+	  
+#	  raise "File list does not exist: '#{tmp_file_list}'" unless File.readable?(tmp_file_list.to_s)
+	  raise "Full file list does not exist: '#{tmp_full_file_list.to_s}'" unless File.readable?(tmp_full_file_list.to_s)
+	  
+	  # have any files been found ? continue only if there are files!	
+	  if $log.debug?
+	    $log.debug{"File list to backup:"}
+	    file_lists.each {|key,list|
+	      $log.debug{"FILELIST: #{key}"}
+	      list.readlines.each {|line|
+		$log.debug{"  " + line.strip}
+	      }
+	    }
+	  end
+
+	  # there are two substantially differing modes of operation:
+	  # "collect" and "separate".
+	  # normally, we do "collect": all files inside one directory are
+	  # being packed into one archive, which is then being crypted.
+	  # but if we run into size limitations (imagine a directory with
+	  # two or more files of 1.5 GB each), this is switched to packing
+	  # and crypting on a per-file basis (mode "separate"), that is,
+	  # each file is being packed into its own archive, which is then
+	  # being crypted. so in "collect" we end up with one file per
+	  # directory, whereas in "separate", we get as many files as there
+	  # were before.
+	  
+	  # to check if we run into size trouble, we first need to count the
+	  # files and sum their sizes
+	  # also, we check if there are files among them which the selected
+	  # packer cannot pack (and thereby filter the file list again by
+	  # file type)
+	  # create an additional file list with all paths removed
+	  # (only for cpio)
+	  	  
+
+	  memory_full_file_list.output_mode = :filename
+	  backup_happened = false
+
+	  pmsg("BackupCollects",lDir)
+
+	  collect_names.each {|collect_name|
+	    if file_lists[collect_name.to_sym] and file_lists[collect_name.to_sym].length > 0
+	      backup_happened = true
+	      file_lists[collect_name.to_sym].output_mode = :filename
+	      count, size = do_backup(source_dir, target_dir, lDir, 
+				      file_lists[collect_name.to_sym], collect_name.to_sym)
+	      add_statistic(:total_output_size,size)
+	      add_statistic(:total_output_count,count)
+
+	      # save backup_files to full_memory_list	      
+	      file_lists[collect_name.to_sym].each {|p|
+		memory_full_file_list[p].backup_file = p.backup_file
+	      }
+	    end
+	  }
+	  pmsg("BackupSeparates",lDir)
+	  if file_lists[:separate] and file_lists[:separate].length > 0
+	    backup_happened = true
+	    file_lists[:separate].output_mode = :filename
+	    count, size = do_backup(source_dir, target_dir, lDir, file_lists[:separate], :separate)
+	    # save backup_files to full_memory_list	      
+	    file_lists[:separate].each {|p|
+	      memory_full_file_list[p].backup_file = p.backup_file
+	    }
+	  end
+	  add_statistic(:total_output_size,size)
+	  add_statistic(:total_output_count,count)
+
+	  if ensure_save_file_list or backup_happened
+	    pmsg("SaveFilelist",lDir)
+	    full_target_dir = backup_file(target_dir, :pathonly, lDir)
+	    makedir_perms(full_target_dir)
+	    memory_full_file_list.save_list_and_stat(full_target_dir)	
+	  end
+	  
+	  old_list.clean_up if old_list
+	  full_file_list.clean_up if full_file_list
+	  file_lists.each {|key,list| list.clean_up }
+	  
+	rescue Errno::ENOENT
+	  raise $! if lDir.exist?
+	  add_statistic(:directories_escaped, 1)
+	  $log.skipped("Directory disappeared while backing up: #{$!}")
+	end      	  
+      }
+    }
+    
+    
+    add_statistic(:total_reduction_count, (100.0 / ($statistics[:total_input_size] or 0)) * ($statistics[:total_output_size] or 0))
+    add_statistic(:total_reduction_size, (100.0 / ($statistics[:total_input_count] or 0)) * ($statistics[:total_output_count] or 0))
+    show_statistics
+    save_statistics(target_file("isibackup/statistics.txt"))
+    save_statistics(logfile("statistics.txt"))
+
+
+    # remove differential reference file
+    if Backup.get_config("OPT_MODE") == "diff" or Backup.get_config("OPT_MODE") == "incr"
+      FileUtils.rm_f("#{Backup.get_config("TMPDIR")}/#{Backup.get_config("lDiffRefFName")}")
+    end
+    
+    # remove directory list
+    dir_list.clean_up
+
+    # set date of last backup
+    finish_time = DateTime.now
+    Backup.set_config("FINISH_TIME",finish_time.strftime("%F %T"))
+    setOldStamp
+    recordFinishTime
+    
+    # write timestamps to detect last success
+    open("#{Backup.get_config("lTargetDir")}/isibackup/finished.date","w") {|f| f.write(finish_time.strftime("%F"))}
+    open("#{Backup.get_config("lTargetDir")}/isibackup/finished.datetime","w") {|f| f.write(finish_time.strftime("%F %T"))}
+
+    release_lock
+
+    # if OPT_COPY is set, do copy
+    if Backup.get_config("OPT_COPY")
+      do_copy 
+    end
+    
+    $log.info("done.")
+# when :copy
+    ##TODO## def do_copy 
+    ##TODO##     raise "Not rewritten yet!"
+    ##TODO## $log.info("Do copy." $LOG_INFO
+    ##TODO##     checkLock
+    ##TODO## 
+    ##TODO##     # get path were the backup is stored
+    ##TODO##     lBackupDir="$(getPathBackup $OPT_MODE)"
+    ##TODO##     if [ -z "$lBackupDir" ] ; then
+    ##TODO##         log "Backup Directory not set. Set PATH_$OPT_MODE to an appropriate value." $LOG_FATAL
+    ##TODO##     fi
+    ##TODO##     lRemoteTargetDir="$(eval echo "$OPT_REMOTE_PATH")"
+    ##TODO##     if [ -z "$lRemoteTargetDir" ] ; then
+    ##TODO##         log "Remote Target Directory not set. Set OPT_REMOTE_PATH to an appropriate value." $LOG_FATAL
+    ##TODO##     fi
+    ##TODO## 
+    ##TODO## $log.info("  Copy using method '$OPT_REMOTE_METHOD' from '$lBackupDir' to '$lRemoteTargetDir'." $LOG_INFO
+    ##TODO## 
+    ##TODO##     check_copier "$OPT_REMOTE_METHOD"
+    ##TODO## 
+    ##TODO##     case $OPT_REMOTE_METHOD in
+    ##TODO##     rsync)
+    ##TODO##         copyRsync "$lBackupDir" "$lRemoteTargetDir"
+    ##TODO##         ;;
+    ##TODO##     ftp)
+    ##TODO##         copyFtp "$lBackupDir" "$lRemoteTargetDir"
+    ##TODO##         ;;
+    ##TODO##     *)
+    ##TODO##         log "Unknown remote-method '$OPT_REMOTE_METHOD'." $LOG_FATAL
+    ##TODO##         ;;
+    ##TODO##     esac
+    ##TODO## 
+    ##TODO##     if [ $OPT_COPY_DELETE_AFTER == "true" ] ; then
+    ##TODO##         rm -f $(find "$lBackupDir" -type d)
+    ##TODO##     fi
+    ##TODO## }
+    ##TODO## 
+    ##TODO## }
+  when :copy
+    $log.info("Do Copy.")
+    do_copy_collect("localhost", 
+		    Backup.get_config("OPT_ARCHIVE"),
+		    Backup.get_config("OPT_REMOTE_HOST"),
+		    Backup.get_config("OPT_REMOTE_PATH"))
+    $log.info("done.")    
+  when :collect
+    $log.info("Do collect.")
+    do_copy_collect(Backup.get_config("OPT_REMOTE_HOST"),
+		    Backup.get_config("OPT_REMOTE_PATH"),
+		    "localhost",
+		    Backup.get_config("OPT_ARCHIVE"))		    
+    $log.info("done.")    
+  else
+    raise "Unexpected action: #{$action}"
+  end
+  
+  $log.info { "started at: #{Backup.get_config("START_TIME")}"}
+  Backup.set_config("FINISH_TIME", DateTime.now.strftime("%F %T"))
+  $log.info { "finished at: #{Backup.get_config("FINISH_TIME")}"}
+  
+  if $action == :collect or $action == :copy
+    setNewStamp("completed")
+  else
+    error_log = Pathname.new(logfile("error.log"))
+    $log.debug{"Error log exist: #{error_log.exist?}"}
+    $log.debug{"Error log size: #{error_log.size}"}
+    if !error_log.exist? or error_log.size != 0 or $error_ocurred
+      setNewStamp("completed_with_errors")
+    else
+      setNewStamp("completed")
+    end
+  end
+    
+  $log.debug{"Exiting normally"}
+  exit 0
+rescue
+  $log.fatal{"Exception '#{$!.class}' ocurred: #{$!}"}
+  $log.info " at"
+  $!.backtrace.each {|line|
+    $log.info line
+  }
+  setNewStamp("aborted_by_exception") if Backup.get_config("PATH_STATE")
+  exit 1
+ensure
+  cleanup_program
+end

@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.1.2//EN"
+                   "http://www.oasis-open.org/docbook/xml/4.1.2/docbookx.dtd">
+<refentry id='isirestore'>
+
+<refmeta>
+<refentrytitle>isirestore</refentrytitle>
+<manvolnum>1</manvolnum>
+</refmeta>
+
+<refnamediv id='name'>
+<refname>isirestore</refname>
+<refpurpose>restore from a backup</refpurpose>
+</refnamediv>
+
+<refsynopsisdiv id='synopsis'>
+<cmdsynopsis>
+  <command>isirestore</command>
+  <arg choice='plain'>--restore</arg>
+  <arg choice='opt'>--verbose</arg>
+  <arg choice='plain'>--source-dir <replaceable>source-dir</replaceable></arg>
+  <arg choice='plain'>--target-dir <replaceable>target-dir</replaceable></arg>
+  <arg choice='plain'>--net <replaceable>net</replaceable></arg>
+  <arg choice='plain'>--host <replaceable>host</replaceable></arg>
+  <arg choice='plain'>--set <replaceable>set</replaceable></arg>
+  <arg choice='opt' rep='repeat'><replaceable>options</replaceable></arg>
+</cmdsynopsis>
+</refsynopsisdiv>
+
+<refsect1 id='description'><title>Description</title>
+<para>
+<application>ISiBackup</application> makes backup easy.
+</para>
+<para>
+<command>isirestore</command> restores a backup, previously created by <command>isibackup</command>, to a restore location.
+In case the backup was enrypted, the use of gpg-agent is recommended and the decryption key must be available.
+</para>
+</refsect1>
+
+<refsect1 id='author'><title>Authors</title>
+<para>
+Written by
+<author><firstname>Marcus</firstname><surname>Holthaus</surname></author>,
+<author><firstname>Simon</firstname><surname>Huerlimann</surname></author> and
+<author><firstname>Adrian</firstname><surname>Friedli</surname></author>.
+</para>
+</refsect1>
+
+<refsect1 id='functions'><title>Functions</title>
+<variablelist>
+  <varlistentry>
+  <term><option>-h</option></term>
+  <term><option>--help</option></term>
+  <listitem>
+    <para>show help information</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-r</option></term>
+  <term><option>--restore</option></term>
+  <listitem>
+    <para>do restore</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-V</option></term>
+  <term><option>--version</option></term>
+  <listitem>
+    <para>show version information</para>
+  </listitem>
+  </varlistentry>
+</variablelist>
+</refsect1>
+
+<refsect1 id='options'><title>Options</title>
+<variablelist>
+  <varlistentry>
+  <term><option>-v</option></term>
+  <term><option>--verbose</option></term>
+  <listitem>
+    <para>give more information</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-w</option></term>
+  <term><option>--debug</option></term>
+  <listitem>
+    <para>give even more information</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-s</option></term>
+  <term><option>--source-dir <replaceable>path</replaceable></option></term>
+  <listitem>
+    <para>source directory where the backup is stored</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-t</option></term>
+  <term><option>--target-dir</option> <replaceable>path</replaceable></term>
+  <listitem>
+    <para>target directory where the restoration of the backup should be stored</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-N</option></term>
+  <term><option>--net</option> <replaceable>path</replaceable></term>
+  <listitem>
+    <para>network name to choose backup from</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-H</option></term>
+  <term><option>--host</option> <replaceable>path</replaceable></term>
+  <listitem>
+    <para>hostname to choose backup from</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-S</option></term>
+  <term><option>--set</option></term>
+  <listitem>
+    <para>name of set to backup</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-p</option></term>
+  <term><option>--passphrase</option></term>
+  <listitem>
+    <para>passphrase for the key that the backup was encrypted with (implies <option>--no-use-agent</option>)</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-A</option></term>
+  <term><option>--no-use-agent</option></term>
+  <listitem>
+    <para>turns off the usage of the gpg-agent</para>
+  </listitem>
+  </varlistentry>
+</variablelist>
+</refsect1>
+
+<refsect1 id='files'><title>Files</title>
+<simplelist>
+<member><filename>/etc/isibackup/isibackup.conf</filename></member>
+<member><filename>/etc/isibackup/defaults.conf</filename></member>
+<member><filename>/etc/isibackup/<replaceable>set</replaceable>/set.conf</filename></member>
+<member><filename>/etc/isibackup/<replaceable>set</replaceable>/include_files.lst</filename></member>
+<member><filename>/etc/isibackup/<replaceable>set</replaceable>/exclude_files.lst</filename></member>
+<member><filename>/etc/isibackup/<replaceable>set</replaceable>/include_dirs.lst</filename></member>
+<member><filename>/etc/isibackup/<replaceable>set</replaceable>/exclude_dirs.lst</filename></member>
+</simplelist>
+</refsect1>
+
+<refsect1 id='seealso'><title>See Also</title>
+<simplelist type="inline">
+<member><command>cleanbackups</command>(1)</member>
+<member><command>deleteolddiffbackups</command>(1)</member>
+<member><command>deleteoldincrbackups</command>(1)</member>
+<member><command>isibackup</command>(1)</member>
+<member><command>isibus</command>(1)</member>
+<!--<member><command>isirestore</command>(1)</member>-->
+</simplelist>
+</refsect1>
+
+<refsect1 id='reportingbugs'><title>Reporting Bugs</title>
+<para>
+Report bugs to <email>bugs@isibackup.org</email>.
+</para>
+</refsect1>
+
+<refsect1 id='copyright'><title>Copyright</title>
+<simplelist>
+<member>Copyright &copy; 1999-2007 IMSEC GmbH</member>
+<member>Copyright &copy; 2004-2007 Logintas AG</member>
+</simplelist>
+<para>
+This program comes with NO WARRANTY, to the extent permitted by law.
+</para>
+</refsect1>
+
+</refentry>
+

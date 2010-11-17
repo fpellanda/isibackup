@@ -1,0 +1,34 @@
+Use case
+--------
+An average family just got their first Linux computer set up by a friend
+of the elder son, Tom. Tom was able to convince his father to save some
+bucks on the operating system but spending it for a faster video card:-)
+
+Tom has been instructed by his friend how to install packages. And so he is
+given the order to setup up "that backup stuff we use at office". His father
+is sure Tom will eventually wipe out all his important emails...
+
+So Tom looks for some backup tool and finds isibackup in the Debian distribution
+He installs it and wants to get some information about what to do next. He
+doesn't want to read manuals or to answer a thousand questions. He just wants
+to show his father that he followed order and continue playing Tuxracer.
+
+The family has one computer that has a connection to the internet. It also has a
+CD-Burner and a reasonable big hard disk (let's say 60GB). Backup is a small
+concern, so not much time will be invested. But reasonable current versions of
+files the family created should be on backed up somewhere.
+
+Noone will think about creating CDs. There need to be some notice, when a backup
+is necessary. An email should be sent to the father and Tom at the end of the
+month saying a new CD has to be created. The creation should be startable
+with only a few clicks or commands.
+
+On day, Toms mother
+
+There should be some possibility for Tom to help his mother when she
+wants to get an old file.
+
+Tom doesn't know about full and differential backup strategies. And he doesn't want
+to. He allways wants to have access to all the available files.
+
+

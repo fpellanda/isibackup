@@ -1,0 +1,58 @@
+TODO: Rework INSTALL, this INSTALL script was written for bash version of
+isibackup.
+
+
+This file describes the installation process for non-Debian systems. Debian
+users should take the package.
+
+Dependencies
+------------
+Beside bash (and some other essential tools) there are no dependencies.
+
+Main Programs
+-------------
+You have to copy libisi.bash to /usr/lib.
+Then you have to copy the executable shell scripts to a place where you can find
+them e.g. /usr/local/bin
+The files you have to copy are: cleanbackups, deleteolddiffbackups,
+deleteoldincrbackups, isibackup, isibus and isirestore.
+(showbackupsizes doesn't work properly at the moment, so we'll skip this.)
+
+Documentation
+-------------
+Go to the docs subdirectory and type `make' if the documentation isn't built
+already.
+For the HTML documentation you need docbook2html installed, for the manpages you
+need docbook2x-man installed.
+The html documentation is built in the html subdirectory of docs. The manpages
+are built in the docs directory itself. You can copy them to a man directory
+e.g. /usr/local/share/man/man1
+
+Configuration
+-------------
+Make a directory called /etc/isibackup and copy at minimum isibackup.conf and
+defaults.conf from the conf subdirectory to it. It's a good idea to copy also
+the sets config, data and system. Sets are subdirectories of the conf directory
+and should also go to /etc/isibackup. For an example cron config see the file
+debian/cron.d.
+installation note
+
+be aware that there might be such subtle things as volumes mounted with wrong parameters (once I erroneously mounted an ntfs volume with codepage cp850 instead of utf8; and setting permissions on a samba share does not work (neither on nfs) so usage of the corresponding flags is needed, and you must alway<s be aware of samba incompatibilities, especially between 2.3 and 2.999 (both on linux!))
+
+in order to use encryption, you must use a crypter that supports encryption of files. this is _not_ the case for the gnupg 1.0.6 which is part of the standard woody distribuition. you need at least gnupg 1.0.7, which is part of sarge.
+
+further on, in order to use encryption, you need a public key to encrypt to. but first of all, you need an ultimately trusted key pair on your system. to generate that, use 
+  gpg --gen-key
+afterwards you have at least one key you trust ultimately. 
+of course, you may import an already trusted key pair from a file. use
+  gpg --import --allow-secret-key-import <keyfile>
+although that second option is marked obsolete, gpg 1.0.7 requires it.
+you must trust this imported key ultimately by setting 
+  gpg --edit-key "imported key"
+    trust
+      5- ultimate
+
+normally, the key for which you cxrypt your backup will be the "Backup Public Key", which you distribute to your system and then import using 
+  gpg --import-keys <filename>
+but that doesn't suffice, as gpg requires you to indicate which key you trust before you may use them. so trust the key by signing it with
+  pgp --sign-key "Backup"  (or whatever you called it)

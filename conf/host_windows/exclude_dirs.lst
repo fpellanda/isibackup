@@ -1,0 +1,46 @@
+# list of directories to be excluded from backup
+#
+# please be aware that these are egrep patterns, not shell patterns!
+# default (if no line here): no directory excluded
+# exclude /var/home if we have /home
+# exlude various locally- and dynamically-generated files
+# from kernel sources, just backup top directory (containting .config)
+#
+/mnt/win/_RESTORE
+/mnt/win/CDROM
+/mnt/win/CD_ROM
+/mnt/win/CD-ROM
+/mnt/win/CDR
+/mnt/win/CD_R
+/mnt/win/CD-R
+/mnt/win/data.2nd
+/mnt/win/Data.2nd
+/mnt/win/TWIXTEL
+/mnt/win/Recycled
+/mnt/win/backup
+/mnt/win/Backup
+/mnt/win/support
+/mnt/win/Support
+/mnt/win/swcoll
+/mnt/win/temp
+/mnt/win/Temp
+/mnt/win/tmp
+/mnt/win/Tmp
+/mnt/win/TMP
+/mnt/win/Windows/temp
+/mnt/win/Windows/temp
+/mnt/win/windows/Temp
+/mnt/win/windows/temp
+# more or less exclude what is included in data backup
+/mnt/win/data
+/mnt/win/Data
+/mnt/win/Dokumente\ und\ Einstellungen
+/mnt/win/Documents\ and\ Settings
+/mnt/win/Eigene\ Dateien
+/mnt/win/isibackup
+/mnt/win/Meine\ Dokumente
+/mnt/win/My\ Documents
+/mnt/win/Windows/All\ Users
+/mnt/win/Windows/Anwendungsdaten
+/mnt/win/Windows/Application\ Data
+/mnt/win/Windows/Profiles

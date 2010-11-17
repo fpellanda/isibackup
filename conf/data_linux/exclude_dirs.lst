@@ -1,0 +1,39 @@
+# list of directories to be excluded from backup
+#
+# please be aware that these are egrep patterns, not shell patterns!
+# default (if no line here): no directory excluded
+# exclude /var/home if we have /home
+# exlude various locally- and dynamically-generated files
+# from kernel sources, just backup top directory (containting .config)
+#
+^/cdrom
+^/dev
+^/floppy
+^/media
+^/proc
+^/sfs
+^/tmp
+# from kernel sources, just backup top directory (containting .config)
+^/usr/src/kernel-source-.*/.*/
+^/usr/src/linux-.*/.*/
+^/var/backups
+^/var/cache/apt/archives
+# exclude various locally- and dynamically-generated files
+^/var/cache/man
+^/var/home
+^/var/lib/defoma
+^/var/lib/doc-base/info
+^/var/lib/dwww
+^/var/lib/scrollkeeper
+^/var/lib/texmf
+^/var/run
+^/var/spool/cron
+^/var/spool/cups
+^/var/spool/exim
+^/var/spool/htdig
+^/var/spool/lpd
+^/var/spool/postfix
+^/var/spool/squid
+^/var/tmp
+# common exclusions
+# ^/var/home

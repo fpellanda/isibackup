@@ -1,0 +1,201 @@
+#!/bin/bash
+# Copyright 2004-2007 IMSEC GmbH
+#
+# This file is part of ISiBackup.
+#
+#    ISiBackup is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    ISiBackup is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with ISiBackup; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+# show the current full and diff backup sizes for all hosts
+
+PROGRAM_IDENT="isiarchive"
+PROGRAM_VERSION="1.4.33"
+COPYRIGHT="Copyright (C) 1999-2007 IMSEC GmbH"
+LIABILITY="This program comes with NO WARRANTY, to the extent permitted by law."
+AUTHORS="Written by Marcus Holthaus and Simon Huerlimann."
+
+PATH_LIB="/usr/lib/libisi"
+source "$PATH_LIB/lib_help.sh"
+source "$PATH_LIB/lib_log.sh"
+source "$PATH_LIB/lib_conf.sh"
+
+PATH_CONF=/etc/isibackup
+ISIBACKUP_CONF=isibackup.conf
+source "${PATH_CONF}/${ISIBACKUP_CONF}"
+
+lHostListFile=${PATH_CONF}/${BACKED_UP_HOSTS}
+lHostList="$(cat $lHostListFile)"
+lDiffDate="$(date -d yesterday +%Y-%m-%d)"
+
+showhostbackupsize () {
+  local lHost="$1"
+  local lUser="$2"
+  local lBackupHost="$3"
+  sleep $lDelay
+  lHostName="$(echo $lHost | cut -f 1 -d '.')"
+  lHostNameShow="$(echo "${lHostName}               " | cut -c 1-15)"
+  echo -n "$lHostNameShow "
+  lBackupHostName="$(echo $lBackupHost | cut -f 1 -d '.')"
+  lBackupHostNameShow="$(echo "${lBackupHostName}               " | cut -c 1-15)"
+  echo -n "$lBackupHostNameShow "
+  lFullSize=$(ssh ${lUser}@${lBackupHost} "du -s ${BACKUP_ROOT}*/full/*/${lHostName}*" 2>&1 | cut -f 1 -d $'\t')
+  if [ ! -z "$(echo "$lFullSize" | grep ssh)" -o ! -z "$(echo "$lFullSize" | grep du)" -o -z "$lFullSize" ] ; then
+    echo -n "abort: can't determine full backup size"
+  else
+    lFullSizeShow="$(echo "$lFullSize            " | cut -c 1-12)"
+    echo -n "$lFullSizeShow "
+    lDiffSize=$(ssh ${lUser}@${lBackupHost} "du -s ${BACKUP_ROOT}*/diff/*/${lDiffDate}*/${lHostName}*" 2>&1 | cut -f 1 -d $'\t' )
+#    lDiffSize=$(ssh ${lUser}@${lBackupHost} "du -s ${BACKUP_ROOT}*/diff/${lDiffDate}*" 2>&1 | cut -f 1 -d $'\t')
+    if [ ! -z "$(echo "$lDiffSize" | grep ssh)" -o ! -z "$(echo "$lDiffSize" | grep du)" -o -z "$lDiffSize" ] ; then
+      echo -n "abort: can't determine diff backup size"
+    else
+      lDiffSizeShow="$(echo "$lDiffSize                    " | cut -c 1-18)"
+      echo -n "$lDiffSizeShow "
+      lRatio=$(( lDiffSize *100 / $lFullSize ))
+      lRatioShow="$(echo "$lRatio\%     " | cut -c 1-5)"
+      echo -n "$lRatioShow "
+      lRestSizeShow="$(ssh ${lUser}@${lBackupHost} "df ${BACKUP_ROOT} | tail -1 | cut -c 42-")"
+      echo -n $lRestSizeShow
+    fi
+  fi
+  echo
+  sleep $lDelay
+}
+
+function run_as_backup_user () {
+local command="$1"
+
+    local config="$($PATH_CONF/isibackup.conf)"
+    
+    backup_user=$(get_config_setting "$config" IDENT_USER_BACKUP)
+    if [ ! "$LOGNAME" == "$backup_user" -a ! "$LOGNAME" == root ] ; then
+        log "You need to be '$backup_user' or root." $LOG_FATAL
+    fi
+    
+    if [ "$LOGNAME" == root ] ; then
+        su - $backup_user $command
+    else
+        $command
+    fi
+}
+
+function do_register_server () {
+local server="$1"
+local username="$2"
+
+    if [ -r ~/.ssh/id_dsa ] ; then
+        log "Using existing SSH identity at '$identity_file'." $LOG_INFO
+    else
+        log "Creating new SSH key pair..." $LOG_INFO
+        ssh-keygen -t dsa -b 512 -N ""
+        log "Done." $LOG_INFO
+    fi
+
+    if [ -z "$username" ] ; then
+        ssh "$server" isiarchive --add-pull $(hostname -f) $(hostname) $LOGNAME
+    fi
+}
+
+function do_add_host () {
+local fqdn=$1
+local ident=$2
+local username=$3
+
+    if [ -z "$fqdn" ] ; then
+        log "You need to give a full qualified hostname to add." $LOG_FATAL
+    fi
+    if [ -z "$ident" ] ; then
+        ident=$(echo "$fqdn" | sed 's/\.*$//')
+    fi
+    
+    local super_config="$(get_config_super_block "$(<conf/isiarchive.conf)")"
+    
+    if [ -z "$username" ] ; then
+        username=$(get_config_setting "$super_config" username)
+    fi
+    if [ -z "$username" ] ; then
+        log "You need to give a username or set the username option in isiarchive.conf." $LOG_FATAL
+    fi
+    
+    local identity_file="$(get_config_setting "$config" ssh_identity)"
+    if [ -z "$identity_file" ] ; then
+        identity_file="$PATH_CONF/$ident.identity"
+    fi
+    
+    if [ -r "$identity_file" ] ; then
+        log "Using SSH identity at '$identity_file'." $LOG_INFO
+    elif [ -r ~/.ssh/id_dsa ] ; then
+        log "Using SSH identity at '~/.ssh/id_dsa'." $LOG_INFO
+        identity_file=~/.ssh/id_dsa                    
+    else
+        log "Creating new SSH key pair..." $LOG_INFO
+        ssh-keygen -t dsa -b 512 -N "" -f "$identity_file"
+        chown backup:backup "$identity_file"
+        chown backup:backup "$identity_file.pub"
+        chmod 600 "$identity_file"
+        chmod 600 "$identity_file.pub"
+    fi
+    
+    ssh-copy-id -i "$identity_file.pub" $username@$fqdn
+}
+
+function do_show () { 
+    log "Backup Sizes on individual hosts"
+  
+    local host_config="$(get_config_block "$(<conf/isiarchive.conf)" roasted)"
+    local hostname=$(get_config_setting "$host_config" hostname)
+    local username=$(get_config_setting "$host_config" username)
+    local ssh_identity=$(get_config_setting "$host_config" ssh_identity)
+    
+    ssh -i "$ssh_identity" $username@$hostname echo hostname -a
+}
+
+function do_help () {
+    echo "'$PROGRAM_IDENT' shows the sizes of created backups on then backed up hosts and on the backup host"
+    echo 
+    echo "Usage: $PROGRAM_IDENT [OPTIONS].."
+    echo 
+    do_help_common_commands
+    echo 
+    do_help_common_options
+    echo
+    echo "Report bugs to bug-$PROGRAM_IDENT@imsec.ch"
+
+}
+
+lCmd="HELP"
+
+log_init
+
+eval set -- "$(getopt -o hvVw --long debug,help,verbose,version,add-host: -n $PROGRAM_IDENT -- "$@")"
+while true ; do
+    case "$1" in
+        -h|--help) lCmd="HELP"; shift ;;
+        -v|--verbose) LOG_MASK_CONSOLE=$LOG_VERBOSE; shift ;;
+        -V|--version) lCmd="VERSION"; shift ;;
+        -w|--debug) LOG_MASK_CONSOLE=$LOG_ALL; shift ;;
+        --add-host) lCmd="add_host"; OPT_HOST="$2" ; shift 2 ;; 
+        --) shift ; break ;;
+        *)  echo "[ERROR] the commandline parsing failed!";  echo "'$@'";  exit 1 ;;
+    esac
+done
+
+case $lCmd in
+    SHOW) do_show ;;
+    HELP) do_help ;;
+    VERSION) do_version ;;
+    add_host) do_add_host $OPT_HOST $1 $2 ;;
+esac
+
+

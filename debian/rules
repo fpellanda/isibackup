@@ -1,0 +1,90 @@
+#!/usr/bin/make -f
+# Copyright 1997-1999 by Joey Hess
+# Copyright (C) 1999-2007  IMSEC GmbH
+# Copyright (C) 2004-2007  Logintas AG
+#
+# This file is part of ISiBackup.
+#
+#    ISiBackup is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    ISiBackup is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License along
+#    with this program; if not, write to the Free Software Foundation, Inc.,
+#    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+#
+
+# Uncomment this to turn on verbose mode.
+# export DH_VERBOSE=1
+
+config.status:
+	dh_testdir
+	# Add here commands to configure the package.
+
+build: build-stamp
+
+build-stamp: config.status
+	dh_testdir
+
+	# Add here commands to compile the package.
+	$(MAKE)
+
+	touch build-stamp
+
+clean:
+	dh_testdir
+	dh_testroot
+	rm -f build-stamp 
+
+	# Add here commands to clean up after the build process.
+	-$(MAKE) clean
+
+	dh_clean
+
+install: build
+	dh_testdir
+	dh_testroot
+	dh_clean -k
+	dh_installdirs
+
+	# Add here commands to install the package into debian/isitools.
+	$(MAKE) DESTDIR=$(CURDIR)/debian/isibackup install
+
+
+# Build architecture-independent files here.
+binary-indep: build install
+	dh_testdir
+	dh_testroot
+	install -D -m 644 debian/aide.conf.d debian/isibackup/etc/aide/aide.conf.d/40_isibackup
+	dh_installdebconf
+	dh_installdocs
+	dh_installlogrotate
+	dh_installinit
+	dh_installcron
+	dh_installman docs/*.1
+	dh_link usr/bin/deleteoldbackups usr/bin/deleteolddiffbackups
+	dh_link usr/bin/deleteoldbackups usr/bin/deleteoldincrbackups
+	dh_link usr/share/man/man1/deleteoldbackups.1 usr/share/man/man1/deleteolddiffbackups.1
+	dh_link usr/share/man/man1/deleteoldbackups.1 usr/share/man/man1/deleteoldincrbackups.1
+	dh_installchangelogs
+	dh_compress
+	dh_fixperms
+	dh_installdeb
+	dh_gencontrol
+	dh_md5sums
+	find $(CURDIR)/debian/isibackup/usr/bin -exec sed -i "s/##DEVELOPMENT##/`grep Version $(CURDIR)/debian/isibackup/DEBIAN/control | sed 's/Version: //'`/" {} \;
+	dh_builddeb
+
+# Build architecture-dependent files here.
+binary-arch: build install
+	dh_testdir
+	dh_testroot
+
+binary: binary-indep binary-arch
+.PHONY: build clean binary-indep binary-arch binary install 

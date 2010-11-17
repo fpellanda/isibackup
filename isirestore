@@ -1,0 +1,246 @@
+#!/usr/bin/ruby
+require 'date'
+
+$LOAD_PATH.insert(0,File.dirname(__FILE__) + "/lib/")
+require 'libisi'
+init_libisi(:ui => "console")
+require "backup"
+
+$action = :list
+display_mode = :normal
+use_directory = false
+
+args = optparse {|o|
+  o.on("--check","Check if files can be extracted and have the right size.") do |name|
+    $action = :check
+  end  
+
+  o.on("--extract","Extract files.") do |name|
+    $action = :extract
+  end  
+
+  o.on("--pipe COMMAND","Pipe each files into command (eg less or grep)") do |command|
+    $action = :pipe
+    $command = command
+  end  
+
+  o.on("--argument COMMAND","Use file as argument for the given command (eg kpdf)") do |command|
+    $action = :argument
+    $command = command
+  end  
+
+  o.on("--detail","Print detail information.") do |name|
+    display_mode = :full
+  end
+
+  o.on("-d","--directory","Don't list directory content, use the given path for restore.") do
+    use_directory = true
+  end
+  
+}
+path = (Pathname.new(FileUtils.pwd) + (args[0] or ".")).cleanpath
+if !use_directory and (path.exist? and path.directory?) or path.to_s =~ /\/$/
+  directory = path
+  file_names = nil
+else
+  directory = path.dirname
+  file_names = [path.basename.to_s]
+end
+
+if directory.exist? and (directory.to_s != directory.realpath.to_s)
+  if $ui.question("Realpath of #{directory} is #{directory.realpath}.\nDid you mean that one?", {:default => false})
+    directory = directory.realpath
+  end
+end
+
+$log.info("Using directory #{directory} and file_names #{file_names.inspect}")
+
+# make directory relative
+directory = Pathname.new(directory.to_s.gsub(/^\//,""))
+
+ENV["BACKUP_ROOT"] ||= Pathname.new("/var/backups/isibackup")
+
+# set
+$log.debug("Getting backup sets")
+sets = Backup.sets
+
+# backup
+$log.debug("Creating backup objects for sets: #{sets.inspect}")
+backups = sets.map {|set| 
+  Backup.new(set)
+} 
+
+# backup, run
+runs = []
+backups.each {|backup|
+  begin
+    backup.get_latest_completed_runs.each {|run|
+      runs.push([backup, run])
+    }
+  rescue
+    $log.warn("Excluding #{backup.to_s}: #{$!}")
+  end
+}
+
+# backups, runs, filelist
+$log.debug("Getting file lists for directory #{directory}")
+lists = []
+runs.each {|backup, run|
+  files, dirs = run.entries_in(directory)
+  next if files.length == 0
+  files.each {|e| e.output_mode = :filename if e.respond_to?(:output_mode)}
+  $log.debug{"Found files in directory #{directory} in backup #{run.root}"}
+  lists.push([backup, run, files, dirs])
+}
+
+unless file_names
+  if lists.length == 0
+    print "No backups found for '#{directory}'.\n"
+    exit 0
+  end
+
+  print "Found backups of the follwing files in '#{directory}':\n"
+  $log.debug("No file selected, giving list for to select")
+  all_files = {}
+  all_dirs = {}
+  lists.each {|backup,run,file_list, dir_list|
+    file_list.each {|file|
+      if file.backup_file
+	all_files["FILE #{file.to_s}"] ||= 0
+	all_files["FILE #{file.to_s}"] += 1
+      end
+    }
+    unless [:pipe, :argument].include?($action)
+      dir_list.each {|dir|
+	all_dirs["DIR #{dir.to_s}"] ||= 0
+	all_dirs["DIR #{dir.to_s}"] += 1
+      }
+    end
+  }
+   
+  i = -1
+  file_names = $ui.select(all_files.keys.sort + all_dirs.keys.sort,true) {|name|    
+    i += 1
+    if i >= all_files.keys.length
+      "#{name}"
+    else
+      "#{all_files[name]} x #{name}"
+    end
+  }
+end
+
+# backups, runs, filelists, entries
+entries = []
+file_names.each {|file_name|
+  $log.debug("Getting entries for filename #{file_name}")
+  lists.each {|backup, run, file_list, dir_list|
+    dir, file = nil, nil
+    if file_name =~ /^DIR (.*)$/
+      dir = dir_list.select {|e| Pathname.new(e).basename.to_s == $1}[0]
+    end
+    if file_name =~ /^FILE (.*)$/
+      file = file_list.select {|e| e.pathname.basename.to_s == $1}[0]
+    end
+      
+    file = file_list.select {|e| e.pathname.basename.to_s == file_name}[0] unless file
+    dir = dir_list.select {|e| Pathname.new(e).basename.to_s == file_name}[0] unless dir
+
+    raise "File and directory with name #{file_name} found." if
+      file and dir
+    entry = (file or dir)
+
+    next if entry.nil? or (entry.respond_to?(:backup_file) and entry.backup_file.nil?)
+    $log.debug{"Found entry."}
+    entries.push [backup, run, file_list, dir_list, entry]
+  }
+}
+
+case $action
+when :pipe, :argument
+
+  entries = $ui.select(entries,true) {|backup,run,file_list, dir_list, entry| entry.explain(display_mode) }
+
+  entries.each {|backup, run, file_list, dir_list, entry|
+    raise "Piping or executing of directories not possible" unless entry.respond_to?(:backup_file)
+    target_file = "/tmp/restore-tempfile-#{Process.pid}"
+    begin
+      run.extract(entry.backup_file, entry.pathname.basename.to_s, target_file)
+      case $action
+      when :pipe	
+	command = "cat '#{target_file}' | #{$command}"
+	info_line = "'#{entry.pathname.basename.to_s}-#{entry.stat[:mtime].strftime("%F %T")}' | #{$command}"
+      when :argument
+	command = "#{$command} '#{target_file}'"
+	info_line = command
+      else
+	raise "Unexpected action #{$action}"
+      end
+      
+      print ("-" * (info_line.length + 12)) + "\n"
+      print ">> START #{info_line} <<\n"
+      print ("v" * (info_line.length + 12)) + "\n"
+      system(command)
+      print ("^" * (info_line.length + 10)) + "\n"
+      print ">> END #{info_line} <<\n"
+      print ("-" * (info_line.length + 10)) + "\n"
+    ensure
+      FileUtils.rm_f(target_file)
+    end
+  }
+
+when :extract
+  entries = $ui.select(entries,true) {|backup,run,file_list, dir_list,entry| 
+    if entry.respond_to?(:backup_file)    
+      entry.explain(display_mode) 
+    else
+      "Directory #{entry} from #{run.root}"
+    end
+  }
+  
+  entries.each {|backup, run, file_list, dir_list, entry|
+    if entry.respond_to?(:backup_file)    
+      target_file = "#{entry.pathname.basename.to_s}-#{entry.stat[:mtime].strftime("%F %T")}"
+      run.extract(entry.backup_file, entry.pathname.basename.to_s, target_file)
+    else
+      target_directory = "#{entry.basename.to_s}-#{run.log[:start_time]}"
+      run.extract_directory(directory + entry, target_directory)
+    end
+  }
+when :check
+  target_file = Pathname.new("/tmp/restore-tempfile-#{Process.pid}.file")
+  entries = $ui.select(entries,true) {|backup,run,file_list,entry| entry.explain(display_mode) }
+  
+  entries.each {|backup, run, file_list, entry|
+    if entry.respond_to?(:backup_file)
+      print "Extract #{entry.pathname.basename} (#{entry.stat[:size]} bytes)..."
+      run.extract(entry.backup_file, entry.pathname.basename.to_s, target_file)
+      if target_file.size == entry.stat[:size]
+	print "#{$ui.colorize(:green) {"OK"}} (#{target_file.size} bytes)\n"
+      else
+	print "FAIL! (#{target_file.size} bytes)\n"
+	exit 1
+      end
+    else
+      raise "Checking directories not implemented yet."
+    end
+  }
+  FileUtils.rm(target_file) if target_file.exist?
+when :list
+  entries.each {|backup, run, file_list, dir_list, entry|
+    if entry.respond_to?(:backup_file)
+      # this is a file    
+      bf = run.root + entry.backup_file
+      print "Found file in: '#{bf}'\n"
+      print entry.explain(display_mode).split("\n").map {|l| "  #{l}"}.join("\n") + "\n"
+    else
+      # this is a directory
+      print "Found directory in: '#{run.root}'\n"
+    end
+  }
+  if entries.length == 0
+    print "No backup found for file '#{file_names.inspect}'\n"
+  end
+when nil
+  raise "unknown action #{$action}"
+end
+

@@ -1,0 +1,590 @@
+#!/bin/bash
+# Copyright (C) 1999-2007  IMSEC GmbH
+# Copyright (C) 2004-2007  Logintas AG
+#
+# This file is part of ISiBackup.
+#
+#    ISiBackup is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    ISiBackup is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License along
+#    with this program; if not, write to the Free Software Foundation, Inc.,
+#    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
+#PROGRAM_IDENT="deleteolddiffbackups"
+#PROGRAM_VERSION="1.5.0~beta3"
+
+lDebug=0
+lDelay=2
+# do not set -e, otherwise it break on greps without result!
+#set -e
+
+ISIBACKUP_CONFIGDIR=${ISIBACKUP_CONFIGDIR:-/etc/isibackup}
+ISIBACKUP_CONFIG_DEFAULTS=${ISIBACKUP_CONFIG_DEFAULTS:-$ISIBACKUP_CONFIGDIR/defaults.conf}
+source "$ISIBACKUP_CONFIG_DEFAULTS"
+
+lForce=0
+lDeleteOldStampFiles=0
+lVerbose=0
+lReadInPreviousFiles=0
+lDoNotTouch=0
+while [ $# -gt 0 ] ; do
+  case $1 in 
+    -f) lForce=1 ; shift ;; 
+    -d) lDeleteOldStampFiles=1 ; shift ;;
+    -v) lVerbose=1 ; shift ;;
+    -r) lReadInPreviousFiles=1 ; shift ;;
+    -t) lDoNotTouch=1; shift ;;
+    -h) echo "parameters:"
+        echo "  -f: actually do the deletions, without this parameter it's a dry-run"
+        echo "  -d: delete old stamp files: *.date files in the state directory that are no more of use. needs interaction!"
+        echo "  -v: add verbosity: tell what you do"
+        echo "  -r: read in files from a previous run. preparing the list takes time, and this saves time, by disregarding changes since the last run. this must be given whenever a list should be kept AND when it should be used (it's best to use it always in case you dont' mind temp files)!"
+        echo "  -t: to do set the directory dates to correspond with the backup dates."
+        echo "  parameters must be given one by one, i.e. -f -v, not -fv"
+        exit 0
+        ;;
+    *) echo "unknown parameter $1. use -h for help. abort." ; exit 1
+  esac
+done
+
+TMPDIR=${TMPDIR:-/var/tmp}/deleteolddiffbackups
+mkdir -p "$TMPDIR"
+lFullSetsDumpFile=$TMPDIR/lFullSets
+lDiffSetsNewDumpFile=$TMPDIR/lDiffSetsNew
+lDiffSetsOldDumpFile=$TMPDIR/lDiffSetsOld
+lTotalSizeFile=$TMPDIR/lTotalSize
+echo "0" > $lTotalSizeFile
+
+cleanup_tempfiles () {
+  if [ ! $lReadInPreviousFiles -eq 1 ] ; then
+    rm -f $lFullSetsDumpFile
+    rm -f $lDiffSetsNewDumpFile
+    rm -f $lDiffSetsOldDumpFile
+  fi
+  rm -f $lTotalSizeFile
+  rmdir --ignore-fail-on-non-empty "$TMPDIR"
+}
+# read in global defaults
+if [ $lVerbose -ge 1 ] ; then
+  echo "sourcing config file '$ISIBACKUP_CONFIG'"
+fi
+source "$ISIBACKUP_CONFIG"
+
+#change_backupdir_timestamps () {
+#  # the original version relied on all backup dirs having the age of their creation.
+#  # this was not always true, especially not on the central backup server.
+#  # so first look for all directories and set them to their proper age
+#  for lTargetDir in ${PATH_DIFF} ; do
+#    echo "changing directory timestamps in $lTargetDir:"
+#    if [ -d "${lTargetDir}" ] ; then
+#      for lDir in $(find $lTargetDir -maxdepth 3 -type d -name '????-??-??' | sort) ; do
+#        echo -n "  Directory: $(basename $(dirname $lDir)) "
+#        lTDate=$(echo "$(basename "${lDir}")0000" | sed 's/\-//g')
+#        for lFile in $lDir $lDir/* ; do
+#         if [ -r "$lFile" -a -d "$lFile" -o -f "$lFile" ] ; then
+#            echo -n "$(basename $lFile) "
+#            touch -t $lTDate $lFile
+#          else
+#            # if there are no subdirs or files inside, try to remove subdir
+#            rmdir "$lDir"
+#          fi
+#        done
+#        echo
+#        sleep $lDelay
+#      done
+#    fi
+#  done
+#}
+
+source_set_file () {
+  # source corresponding set definitions to determine target directory
+  OPT_SET=$lBackedUpSet
+  HOST="$lHostName"
+  NET="$lNetName"
+  # everything behind the date is disregarded
+  eval PATH_FULL=$DEFAULT_BACKUP_URI_full
+  lDateString=*
+  eval PATH_DIFF=$DEFAULT_BACKUP_URI_diff
+  lSetConfigFile=/etc/isibackup/$OPT_SET/set.conf
+  if [ -e "$lSetConfigFile" -a -r "$lSetConfigFile" ] ; then
+    source "$lSetConfigFile"
+  fi
+#  if [ $lDebug -ge 2 ] ; then
+#    sleep $lDelay
+#  fi
+  if [ $lDebug -ge 3 ] ; then
+    set
+  fi
+}
+
+collect_full_backups_from_log_entries () {
+  # we are looking for full backups with subsequent diff backups of the same set
+  # for each of them we need the hostname, the full backup date, the output size, and the full backup path
+
+  # check for information from ".log" files: the last full backup of each type
+  # and for ".date" files, if not covered by the entries from the ".log" file
+
+  # first collect the information for the full backups    
+  if [ $lVerbose -ge 1 ] ; then
+    echo "  processing log files from state directory for full backups"
+  fi
+  for lLogFile in $(find . -name '*.log' | grep -v '~' | grep -v '^.$' | sort ); do
+    if [ $lVerbose -ge 1 ] ; then
+      echo "    log file $lLogFile"
+    fi
+    # get list of backup sets
+    lBackedUpSetsInThisLogFile="$(cat $lLogFile | egrep "(.*,){2}BACKUP,.*,full," | cut -f 4 -d ',' | sort -u | xargs)"
+    for lBackedUpSet in $lBackedUpSetsInThisLogFile ; do
+      # get last full backup of this set
+      lThisSetLine="$(cat $lLogFile | egrep "(.*,){3}$lBackedUpSet,full" | sort -k 2 -t ',' | tail -1)"
+      lFullBackupStartDate=$(echo $lThisSetLine | cut -f 1 -d ',' | cut -f 1 -d ' ')
+      lFullBackupEndDate=$(echo $lThisSetLine | cut -f 2 -d ',' | cut -f 1 -d ' ')
+      lFullOutputSize=$(echo $lThisSetLine | cut -f 12 -d ',')
+      lHostName=$(echo $lThisSetLine | cut -f 14 -d ',')
+      if [ $lVerbose -ge 1 ] ; then
+        echo -n "      set $lHostName, $lFullBackupStartDate - $lFullBackupEndDate, $lBackedUpSet, $lFullOutputSize"
+      fi
+      if [ -z "$lHostName" ] ; then
+        lHostName="$(echo $(basename $lLogFile) | cut -f 1 -d '.')"
+      fi
+      lNetName=$(echo $lThisSetLine | cut -f 2 -d ',' | cut -f 15 -d ' ')
+      if [ -z "$lNetName" ] ; then
+        lNetName="$(echo $(basename $lLogFile .log) | cut -f 2- -d '.')"
+      fi
+      if [ -z "$lNetName" ] ; then
+        lNetName='*'
+      fi
+      # get original target directory
+      lFullTargetDir=$(echo $lThisSetLine | cut -f 18 -d ',')
+      if [ -z "$lFullTargetDir" ] ; then
+        # if original target not set in log (prior to isibackup 1.4.33), source set configuration (if available)
+        source_set_file
+        lFullTargetDir="$PATH_FULL"
+      fi
+      echo "$lFullBackupStartDate,$lFullBackupEndDate,,$lBackedUpSet,full,,,,,,,$lFullOutputSize,,$lHostName,$lNetName,,,$lFullTargetDir" >> $lFullSetsDumpFile
+      if [ $lVerbose -ge 1 ] ; then
+        echo ": added."
+      fi
+#      if [ $lDebug -ge 2 ] ; then
+#        sleep $lDelay
+#      fi
+    done
+  done
+  if [ $lDebug -ge 2 ] ; then
+    sleep $lDelay
+    cat "$lFullSetsDumpFile"
+  fi
+  
+}
+
+collect_full_backups_from_stamp_files () {    
+  if [ $lVerbose -ge 1 ] ; then
+    echo "  processing stamp files from state directory for full backups"
+  fi
+  # check for unhandled "old stamps"
+  for lDateFilePath in $(find . -name '*.date' | grep -v '~' | grep -v '^.$'| sort) ; do
+    if [ $lVerbose -ge 1 ] ; then
+      echo "    stamp file $lDateFilePath: "
+    fi
+    lDateFileName="$(basename $lDateFilePath)"
+    lHostName=$(echo $lDateFileName | cut -f 1 -d '-')
+    lNetName="*"
+    lFullBackupStartDate=$(cat $lDateFileName) # | sed 's/\-//g')0000
+    # allow for hostnames with dash and without
+    lBackedUpSet=$(echo $lDateFileName | cut -f 3 -d '-' | sed 's/fullbackup.date//')
+    if [ -z "$lBackedUpSet" ] ; then
+      lBackedUpSet=$(echo $lDateFileName | cut -f 2 -d '-' | sed 's/fullbackup.date//')
+    fi
+
+    if [ $lVerbose -ge 1 ] ; then
+      echo -n "      set $lHostName, $lFullBackupStartDate - ?, $lBackedUpSet"
+    fi
+    # check if already in list, add if not
+#    mv -vf $lFullSetsDumpFile $lFullSetsDumpFile.tmp
+    if [ -z "$(cat $lFullSetsDumpFile | egrep "(.*,){3}$lBackedUpSet,(.*,){9}$lHostName,")" ] ; then
+      # determine full backup path from set file
+      lFullTargetDir=""        
+      source_set_file
+      if [ -z "$PATH_FULL" ] ; then
+        if [ $lVerbose -ge 1 ] ; then
+          echo ": full backup path could not be determined. skipping."
+        fi
+      else
+        lFullTargetDir="$PATH_FULL"
+        # determine actual size (in case of patterns: take the first one that matches)
+        lFullOutputSize=0
+        for lCurFullTargetDir in $lFullTargetDir ; do
+          if [ -e "$lCurFullTargetDir" -a -d "$lCurFullTargetDir" ] ; then 
+            lFullTargetDir="$lCurFullTargetDir"
+            lFullOutputSize="$(du -s "$lCurFullTargetDir" | cut -f 1)"
+            lFullBackupEndDate="$(stat -c %y "$lCurFullTargetDir" | cut -f 1 -d ' ')"
+            break
+          fi
+        done
+        if [ -z "$lFullBackupEndDate" ] ; then
+          lFullBackupEndDate=$lFullBackupStartDate
+        fi
+        if [ $lVerbose -ge 1 ] ; then
+          echo -n ", $lFullOutputSize: "
+        fi
+        if [ $lDeleteOldStampFiles -eq 1 -a ! -e "$lFullTargetDir" -a $lFullOutputSize -eq 0 ] ; then
+          if [ $lVerbose -ge 1 ] ; then
+            echo ":"
+          fi
+          echo "      Stamp file $lDateFilePath contains an entry $lFullBackupStartDate, but there is no full backup at $lFullTargetDir."
+          echo -n "      Delete Stamp File (y/N)? "
+          read y
+          if [ "$y" == "y" ] ; then
+            rm -fv $lDateFilePath
+          fi
+        else
+          echo "$lFullBackupStartDate,,,$lBackedUpSet,full,,,,,,,$lFullOutputSize,,$lHostName,$lNetName,,,$lFullTargetDir" >> $lFullSetsDumpFile
+          if [ $lVerbose -ge 1 ] ; then
+            echo ": added."
+          fi
+        fi
+      fi
+    else
+      if [ $lVerbose -ge 1 ] ; then
+        echo ": already in list"
+      fi
+    fi
+#    rm -vf $lFullSetsDumpFile.tmp
+#    if [ $lDebug -ge 2 ] ; then
+#      sleep $lDelay
+#    fi
+  done
+  if [ $lDebug -ge 2 ] ; then
+    sleep $lDelay
+    cat "$lFullSetsDumpFile"
+    cat "$lFullSetsDumpFile" | grep -v '^$' > ${lFullSetsStampDumpFile}
+  fi
+}
+
+collect_diff_backups_from_log () {
+  if [ $lVerbose -ge 1 ] ; then
+    echo "  processing log files from state directory for diff backups to full set $lBackedUpSet for host $lHostName to backup end date $lFullBackupEndDate"
+  fi
+  # collect all log files into one array, sort them by end date,
+  # select only the entries with correct set and hostname,
+#if [ "$lHostName" == "bean" -a $lBackedUpSet == "data_linux" ] ; then set -vx ; fi
+
+  lLogFileList="$(find . -name '*.log' | grep -v '~' | grep -v '^.$')"
+  lDiffLogInfoSetHost=$(egrep -h "(.*,){3}$lBackedUpSet,(.*,){9}$lHostName" $lLogFileList)
+  lDiffLogInfoSetHost="$(echo "$lDiffLogInfoSetHost" | sort -k 2 -t ',')"
+  lDiffLogInfoSetHost="$(echo "$lDiffLogInfoSetHost" | grep -v '^$')"
+#  echo "lDiffLogInfoSetHost: $lDiffLogInfoSetHost"
+  
+#  # search for the full backup set we already know and select 1000 lines after that
+#  # finally remove the line with the full backup entry
+#  # and we have the list of the diff backups following that full backup
+#  lDiffLogInfoSetHostDiffNew="$(echo $lDiffLogInfoSetHost \
+#    | egrep -A 1000 ".*,$lFullBackupEndDate.*,.*,$lBackedUpSet,full,.*,.*,.*,.*,.*,.*.,*.,.*,$lHostName" \
+#    | egrep -v ".*,.*,.*,.*,full")"
+#  lDiffLogInfoSetHostDiffOld="$(echo $lDiffLogInfoSetHost \
+#    | egrep -v ".*,.*,.*,.*,full")"
+  echo "    $(echo "$lDiffLogInfoSetHost" | grep "diff" | wc -l) diff lines in lDiffLogInfoSetHost"
+  
+  if [ ! -z "$lDiffLogInfoSetHost" ] ; then  
+  echo "$lDiffLogInfoSetHost" | while read lThisSetLine ; do
+    lMode="$(echo "$lThisSetLine" | cut -f 5 -d ',')"
+    if [ "$lMode" == "diff" ] ; then
+      lDiffBackupStartDate="$(echo "$lThisSetLine" | cut -f 1 -d ',' | cut -f 1 -d ' ')"
+      lDiffBackupEndDate="$(echo "$lThisSetLine" | cut -f 2 -d ',' | cut -f 1 -d ' ')"
+      lDiffOutputSize=$(echo $lThisSetLine | cut -f 2 -d ',' | cut -f 12 -d ' ')
+
+      # get original target directory
+      lDiffTargetDir=$(echo $lThisSetLine | cut -f 2 -d ',' | cut -f 18 -d ' ')
+      if [ -z "$lDiffTargetDir" ] ; then
+        # if original target not set in log (prior to isibackup 1.4.33), source set configuration (if available)
+        source_set_file
+        lDiffTargetDir="$PATH_DIFF"
+      fi
+      if [ $lVerbose -ge 1 ] ; then
+        echo -n "      set $lHostName, $lDiffBackupStartDate - $lDiffBackupEndDate, $lBackedUpSet, $lDiffOutputSize"
+      fi
+      # replace * in lDiffTargetDir with Backup Date
+      if [ -z "$lDiffBackupStartDate" ] ; then 
+        lDiffBackupStartDate=$lDiffBackupEndDate
+      fi
+      lDiffTargetDir="$(echo "$lDiffTargetDir" | sed "s/\\*/$lDiffBackupStartDate/")"
+      if [ $(echo $lDiffBackupEndDate | sed 's/-//g') -gt $(echo $lFullBackupEndDate | sed 's/-//g') ] ; then
+        echo "$lDiffBackupStartDate,$lDiffBackupEndDate,,$lBackedUpSet,diff,,,,,,$lDiffOutputSize,,,$lHostName,$lNetName,,,$lDiffTargetDir" >> $lDiffSetsNewDumpFile
+      else
+        echo "$lDiffBackupStartDate,$lDiffBackupEndDate,,$lBackedUpSet,diff,,,,,,$lDiffOutputSize,,,$lHostName,$lNetName,,,$lDiffTargetDir" >> $lDiffSetsOldDumpFile
+      fi
+      if [ $lVerbose -ge 1 ] ; then
+        echo ": added."
+      fi
+      if [ $lDebug -ge 2 ] ; then
+        sleep $lDelay
+      fi
+    fi
+  done
+  fi
+}
+
+collect_diff_backups_from_dirs () {
+  # now we have a list of old and new backups from the log file.
+  # some of the backups from the log files may have been erased a long time ago, but probably not all of them.
+
+  # additionally, there may by diff backups from older versions of isibackup,
+  # so search for them in the diff path of the original set, and add them to the list of old backups
+
+  if [ $lVerbose -ge 1 ] ; then
+    echo "  processing directories for diff backups to full set $lBackedUpSet for host $lHostName to date $lFullBackupEndDate"
+  fi
+  lDiffTargetDir=""        
+  TODAY='*'
+  source_set_file
+  if [ -z "$PATH_DIFF" ] ; then
+    if [ $lVerbose -ge 1 ] ; then
+      echo "    diff backup path for set $lBackedUpSet could not be determined. skipping this path."
+    fi
+  else
+    lDiffTargetDir="$PATH_DIFF"
+    for lDiffTargetHostDir in $lDiffTargetDir ; do
+      if [ $lVerbose -ge 1 ] ; then
+        echo -n "    directory $lDiffTargetHostDir: "
+      fi
+      # determine actual size
+      if [ -e "$lDiffTargetHostDir" -a -d "$lDiffTargetHostDir" ] ; then
+        lAddToDiffSetNew=0; lAddToDiffSetOld=0
+        # do not use %z here, as inode changes may occur long after backup run
+        lDiffBackupStartDate="$(stat -c %y "$lDiffTargetHostDir" | cut -f 1 -d ' ')"
+        lDiffBackupEndDate="$(stat -c %y "$lDiffTargetHostDir" | cut -f 1 -d ' ')"
+        if [ $(echo $lDiffBackupEndDate | sed 's/-//g') -gt $(echo $lFullBackupEndDate | sed 's/-//g') ] ; then
+          lAddToDiffSetNew=1
+          lAddToFile=$lDiffSetsNewDumpFile
+        else 
+          lAddToDiffSetOld=1
+          lAddToFile=$lDiffSetsOldDumpFile
+        fi
+
+        if [ $lAddToDiffSetOld -eq 1 -o $lAddToDiffSetNew -eq 1 ] ; then
+          if [ -z "$(egrep ".*,$lDiffBackupEndDate,(.*,){1}$lBackedUpSet,diff,(.*,){8}$lHostName,(.*,){3}$lDiffTargetHostDir" $lAddToFile)" ] ; then
+            lDiffOutputSize="$(du -s "$lDiffTargetHostDir" | cut -f 1)"
+            if [ $lDiffOutputSize -gt 0 ] ; then
+              echo "$lDiffBackupStartDate,$lDiffBackupEndDate,,$lBackedUpSet,diff,,,,,,$lDiffOutputSize,,,$lHostName,$lNetName,,,$lDiffTargetHostDir" >> $lAddToFile
+              if [ $lVerbose -ge 1 ] ; then
+                echo  "added, size $lDiffOutputSize."
+              fi
+            else
+              if [ $lVerbose -ge 1 ] ; then
+               echo  "is empty, skipped."
+              fi
+            fi    
+          else
+            if [ $lVerbose -ge 1 ] ; then
+              echo  "already in, skipped."
+            fi
+          fi
+        fi
+        if [ $lDebug -ge 2 ] ; then
+          sleep $lDelay
+        fi
+      else
+        if [ $lVerbose -ge 1 ] ; then
+          echo  "does not exist."
+        fi
+      fi
+    done
+  fi
+}
+
+set_directory_dates () {
+  # first check for the existence of each diff backup 
+  # if it exists, set its directory date to the correct date
+  # otherwise, remove it from the list
+  if [ $lVerbose -ge 1 ] ; then
+    echo "setting directory access dates to correspond with actual backup date"
+  fi
+  for lSets in lDiffSetsOld lDiffSetsNew ; do
+    lFileNameName=${lSets}DumpFile
+    cat "${!lFileNameName}" | while read lCurDiffSet ; do
+      lDiffTargetDir="$(echo "$lCurDiffSet" | cut -f 18 -d ',')"
+      if [ $lVerbose -ge 1 ] ; then
+        echo -n "  $lDiffTargetDir: "
+      fi
+      if [ -e "$lDiffTargetDir" -a -d "$lDiffTargetDir" ] ; then
+        lDiffBackupStartDate="$(echo "$lCurDiffSet" | cut -f 2 -d ',' | cut -f 1 -d ' ')"
+        lDiffBackupEndDate="$(echo "$lCurDiffSet" | cut -f 2 -d ',' | cut -f 1 -d ' ')"
+        if [ -z "$lDiffBackupStartDate" ] ; then
+          lDiffBackupStartDate=$lDiffBackupEndDate
+        fi
+        touch -t $(echo ${lDiffBackupStartDate}0000 | sed 's/-//g') $lDiffTargetDir
+#      else
+#        $lSets="$(echo "${!lSets}" \
+#        | grep -v ",$lDiffBackupEndDate,.*,$lBackedUpSet,diff,.*,.*,.*,.*,.*,.*,.*,.*,$lHostName,$lNetName,.*,.*,$lDiffTargetHostDir")"
+        if [ $lVerbose -ge 1 ] ; then
+          echo "touched"
+        fi
+      else
+        if [ $lVerbose -ge 1 ] ; then
+          echo "does not exist. skipped."
+        fi
+      fi
+      if [ $lDebug -ge 2 ] ; then
+        sleep $lDelay
+      fi
+    done
+  done  
+}
+
+delete_old_directories () {
+  if [ $lVerbose -ge 1 ] ; then
+    echo "deleting old differential backups"
+  fi
+  # finally, do the deletions
+  cat "${lDiffSetsOldDumpFile}" | grep -v '^$' | while read lCurDiffSet ; do
+    lDiffTargetDir="$(echo "$lCurDiffSet" | cut -f 18 -d ',')"
+    if [ $lVerbose -ge 1 ] ; then
+      echo -n "  $lDiffTargetDir: "
+    fi
+    if [ -d "$lDiffTargetDir" ] ; then
+      lDiffOutputSize="$(echo "$lCurDiffSet" | cut -f 12 -d ',')"
+      if [ -z "$lDiffOutputSize" ] ; then
+        lDiffOutputSize=0
+      fi
+      if [ $lDiffOutputSize -eq 0 ] ; then
+        lDiffOutputSize="$(du -s "$lDiffTargetDir" | cut -f 1)"
+      fi
+      if [ $lForce -eq 1 ] ; then 
+        rm -rf $lDiffTargetDir
+      else
+        if [ $lVerbose -ge 1 ] ; then
+          echo -n "would have "
+        fi
+      fi
+      lTotalSize=$(<$lTotalSizeFile)
+      lTotalSize=$(( $lTotalSize + $lDiffOutputSize ))
+      echo "$lTotalSize" > $lTotalSizeFile
+      if [ $lVerbose -ge 1 ] ; then
+        echo "deleted $lDiffOutputSize"
+      fi
+    else
+      if [ $lVerbose -ge 1 ] ; then
+        echo "does not exist."
+      fi
+    fi
+    if [ $lDebug -ge 2 ] ; then
+      sleep $lDelay
+    fi
+  done
+}
+
+collect_diff_backups_and_delete_old_ones () {    
+  # now that we have all full backup information, determine the diff backup information
+  # first try to get that from the log file
+  if [ $lReadInPreviousFiles -eq 1 -a -e ${lDiffSetsNewDumpFile} -a -r ${lDiffSetsNewDumpFile} -a -e ${lDiffSetsOldDumpFile} -a -r ${lDiffSetsOldDumpFile} ] ; then
+    echo "using $lDiffSetsNewDumpFile and $lDiffSetsOldDumpFile from previous run"
+    touch $lDiffSetsNewDumpFile
+    touch $lDiffSetsOldDumpFile
+  else
+    rm -vf $lDiffSetsNewDumpFile
+    rm -vf $lDiffSetsOldDumpFile
+
+  for lFullSet in $(cat "$lFullSetsDumpFile") ; do
+    lFullBackupStartDate="$(echo "$lFullSet" | cut -f 1 -d ',')"
+    lFullBackupEndDate="$(echo "$lFullSet" | cut -f 2 -d ',')"
+    lBackedUpSet="$(echo "$lFullSet" | cut -f 4 -d ',')"
+    lFullOutputSize="$(echo "$lFullSet" | cut -f 12 -d ',')"
+    lHostName="$(echo "$lFullSet" | cut -f 14 -d ',')"
+    lNetName="$(echo "$lFullSet" | cut -f 15 -d ',')"
+    lFullTargetDir="$(echo "$lFullSet" | cut -f 18 -d ',')"
+
+
+    collect_diff_backups_from_log
+    collect_diff_backups_from_dirs
+
+    # now we have the complete list of diff backups corresponding to the current full backup
+    # sorted in "new" and "old" backups
+  done
+  fi      
+  if [ ! $lDoNotTouch -eq 1 ] ; then 
+    set_directory_dates
+  fi
+  delete_old_directories
+    
+#      lHostSize=0
+#      echo "    full backup date for set $lBackedUpSet for $lHostName: $lFullBackupEndDate"
+#      echo "  Status: $lDateFileName"
+#      touch -t $lFullBackupEndDate $TMPDIR/$lDateFileName
+#
+#      if [ ! -z "$PATH_DIFF" ] ; then      
+#        PATH_DIFF="$(echo $PATH_DIFF | sed 's/===DELETE_FROM_HERE_ON.*//')"
+#
+#        change_backupdir_timestamps
+#
+#        for lTargetDir in ${PATH_DIFF} ; do
+#          if [ -d "${lTargetDir}" ] ; then
+#          echo "    looking for older backups in $lTargetDir:"
+#            lNewerCmd="find $lTargetDir -maxdepth 3 -name "$lHostName" -type d -newer $TMPDIR/$lDateFileName | sort"
+#            lNewer="$(eval $lNewerCmd)"
+#            lNewerCount=$(eval $lNewerCmd | wc -l)
+#            if [ $lNewerCount -gt 0 ] ; then
+#              echo -n "      diffs newer than full: $lNewerCount: "
+#              echo "$lNewer" | while read dNewer ; do echo -n "$(basename $(dirname $dNewer)) " ; done ; echo
+#              for lDir in $(find $lTargetDir -maxdepth 3 -name "$lHostName" -type d ! -newer $TMPDIR/$lDateFileName | sort) ; do
+#                lSize=$(du -s $lDir | cut -f 1 -d '/')
+#                lHostSize=$(( $lHostSize + $lSize ))
+#                if [ $lForce == 1 ] ; then
+#                  echo -n "        deleting older backup $(basename $(dirname $lDir)) with size $lSize... "
+#                  rm -rf $lDir
+#                  echo "gone. new free space: $(df $(dirname $lDir) | tail -1 | awk '{ print $4 " of " $2 " (" $5 " full)"; }')"
+#                  sleep $lDelay
+#                fi
+#              done
+#              echo "      deleting ${lHostSize} for Host ${lHostName}"
+#            else
+#              echo "      no newer backups. not deleting older ones."
+#            fi
+#            lTotalSize=$(( $lTotalSize + $lHostSize ))
+#          fi
+#        done
+#      fi
+}
+
+collect_full_backups () {
+
+  if [ $lReadInPreviousFiles -eq 1 -a -e ${lFullSetsDumpFile} -a -r ${lFullSetsDumpFile} ] ; then
+    echo "using $lFullSetsDumpFile from previous run"
+    touch $lFullSetsDumpFile
+  else
+    rm -vf $lFullSetsDumpFile
+    collect_full_backups_from_log_entries 
+    collect_full_backups_from_stamp_files
+  fi
+}
+
+main () {
+  # now go through all status dirs
+  # dont fall for the assumption that status fils are in the same mount as that backup
+  for lStateDir in ${BACKUP_ROOT}/{,*/isibackup/}state ; do
+    if [ -d "${lStateDir}" ] ; then
+      if [ $lVerbose -ge 1 ] ; then
+        echo "checking backups status files in $lStateDir"
+      fi
+      cd $lStateDir
+
+      collect_full_backups
+      collect_diff_backups_and_delete_old_ones
+    fi
+    if [ $lDebug -ge 2 ] ; then
+      sleep $lDelay
+    fi
+  done
+  echo "deleting total of $(<$lTotalSizeFile)"
+}
+
+main
+
+cleanup_tempfiles

@@ -1,0 +1,34 @@
+Template: isibackup/backup_root
+Type: string
+Default: /var/backups/isibackup
+Description: Directory the backups get stored to:
+ ISiBackup needs a directory, where all the backups are stored to.
+ /var/backups/isibackup is generally a good idea.
+ Assure the directory exists if you choose your own.
+
+Template: isibackup/cmd_crypt
+Type: select
+Choices: gpg
+Default: gpg
+Description: Tool used for encryption of target files:
+ ISiBackup will support multiple encryption tools.
+ For the moment this means only gpg in version 1.2 and above.
+ You need to install and setup them correctly by yourself.
+
+Template: isibackup/opt_packmethod
+Type: select
+Choices: cpio.bz2
+Default: cpio.bz2
+Description: Tools used for collecting and compressing target files:
+ ISiBackup supports multiple packaging tools. Which one do you prefer? Only cpio.bz2 is fully
+ supported by now.
+
+Template: isibackup/crypt_keys
+Type: string
+Default: Backup
+Description: Idents of GnuPG public keys used for encrypting backups:
+ In order to encrypt your backups you must specify the ident of a PGP/gpg key to use.
+ You can specify multiple keys separated by semicolon.
+ It is sufficient to specify only a part of the identifier. The key looked up
+ with PGP's own method. So have a look into it's manuals to get more information.
+ You need to import and validate this correctly by yourself.

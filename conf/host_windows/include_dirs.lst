@@ -1,0 +1,10 @@
+# list of directories to be included in backup
+#
+# please be aware that these are shell patterns, not egrep patterns!
+# they will be used as input for the find command
+# default (if no line here): no directory included!
+# do escape all spaces with a backslah
+# do not use expansions and spaces on the same line
+# there is no standard location where to mount a windows partition. /mnt/win is assumed here.
+#
+/mnt/win/

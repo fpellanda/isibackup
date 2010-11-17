@@ -1,0 +1,373 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.1.2//EN"
+                   "http://www.oasis-open.org/docbook/xml/4.1.2/docbookx.dtd">
+<refentry id='isibackup'>
+
+<refmeta>
+<refentrytitle>isibackup</refentrytitle>
+<manvolnum>1</manvolnum>
+</refmeta>
+
+<refnamediv id='name'>
+<refname>isibackup</refname>
+<refpurpose>run and manage backups</refpurpose>
+</refnamediv>
+
+<refsynopsisdiv id='synopsis'>
+<cmdsynopsis>
+  <command>isibackup</command>
+  <arg choice='plain'>--backup</arg>
+  <group choice='req'>
+    <arg>--full</arg>
+    <arg>--diff</arg>
+    <arg>--incr</arg>
+  </group>
+  <arg choice='plain'>--set <replaceable>set</replaceable></arg>
+  <arg choice='opt' rep='repeat'><replaceable>options</replaceable></arg>
+</cmdsynopsis>
+<cmdsynopsis>
+  <command>isibackup</command>    
+  <group choice='req'>
+    <arg>--collect</arg>
+    <arg>--collect-state</arg>
+    <arg>--collect-content</arg>
+    <arg>--copy</arg>
+  </group>
+  <arg choice='plain'>--set <replaceable>set</replaceable></arg>
+  <arg choice='opt' rep='repeat'><replaceable>options</replaceable></arg>
+</cmdsynopsis>
+<cmdsynopsis>
+  <command>isibackup</command>
+  <group choice='opt'>
+    <arg>--help</arg>
+    <arg>--version</arg>
+  </group>
+</cmdsynopsis>
+</refsynopsisdiv>
+
+<refsect1 id='description'><title>Description</title>
+<para>
+<application>ISiBackup</application> makes backup easy.
+</para>
+<para>
+<command>isibackup</command> creates collected, compressed, encrypted backups of arbritrary source directory trees.
+</para>
+</refsect1>
+
+<refsect1 id='author'><title>Authors</title>
+<para>
+Written by
+<author><firstname>Marcus</firstname><surname>Holthaus</surname></author>,
+<author><firstname>Simon</firstname><surname>Huerlimann</surname></author> and
+<author><firstname>Adrian</firstname><surname>Friedli</surname></author>.
+</para>
+</refsect1>
+
+<refsect1 id='functions'><title>Functions</title>
+<variablelist>
+  <varlistentry>
+  <term><option>-h</option></term>
+  <term><option>--help</option></term>
+  <listitem>
+    <para>show help information</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-b</option></term>
+  <term><option>--backup</option></term>
+  <listitem>
+    <para>do backup</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-C</option></term>
+  <term><option>--collect</option></term>
+  <listitem>
+    <para>get backups from other hosts</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>--collect-state</option></term>
+  <listitem>
+    <para>same as <option>--collect</option>, but only collect state logs</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>--collect-content</option></term>
+  <listitem>
+    <para>same as <option>--collect</option>, but only collect backup data</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-c</option></term>
+  <term><option>--copy</option></term>
+  <listitem>
+    <para>push backups to another host</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-V</option></term>
+  <term><option>--version</option></term>
+  <listitem>
+    <para>show version information</para>
+  </listitem>
+  </varlistentry>
+</variablelist>
+</refsect1>
+
+<refsect1 id='options'><title>Options</title>
+<variablelist>
+  <varlistentry>
+  <term><option>-v</option></term>
+  <term><option>--verbose</option></term>
+  <listitem>
+    <para>give more information</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-w</option></term>
+  <term><option>--debug</option></term>
+  <listitem>
+    <para>give even more information</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-a</option></term>
+  <term><option>--archive</option> <replaceable>path</replaceable></term>
+  <listitem>
+    <para>save collected backups to <replaceable>path</replaceable></para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-y</option></term>
+  <term><option>--collect-delete-after</option></term>
+  <listitem>
+    <para>delete source after collecting (dangerous!)</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-d</option></term>
+  <term><option>--config</option> <replaceable>file</replaceable></term>
+  <listitem>
+    <para>use <replaceable>file</replaceable> as config file</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>--configdir</option> <replaceable>path</replaceable></term>
+  <listitem>
+    <para>load configfiles from <replaceable>path</replaceable> instead of <filename class="directory">/etc/isibackup/</filename></para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-D</option></term>
+  <term><option>--diff</option></term>
+  <listitem>
+    <para>differential backup mode</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-I</option></term>
+  <term><option>--incr</option></term>
+  <listitem>
+    <para>incremental backup mode</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-F</option></term>
+  <term><option>--full</option></term>
+  <listitem>
+    <para>full backup mode</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-k</option></term>
+  <term><option>--key</option> <replaceable>ident</replaceable></term>
+  <listitem>
+    <para>use pgp key <replaceable>ident</replaceable> (multiple times for more keys)</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-l</option></term>
+  <term><option>--log</option> <replaceable>file</replaceable></term>
+  <listitem>
+    <para>log all actions to <replaceable>file</replaceable></para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>--logdir</option> <replaceable>path</replaceable></term>
+  <listitem>
+    <para>save configfiles there</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>--no-dir-renewal</option></term>
+  <listitem>
+    <para>don't recreate directories when only the timestamp is newer but there are no newer files</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-x</option></term>
+  <term><option>--other-filesystems</option></term>
+  <listitem>
+    <para>backup files on other filesystems/mounted devices</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>--progress</option></term>
+  <listitem>
+    <para>show progress information</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-q</option></term>
+  <term><option>--quiet</option></term>
+  <listitem>
+    <para>be quiet, print only errors</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>--recreate-archive</option></term>
+  <listitem>
+    <para>deletes the directory of the actual backup and recreates it. Only useful for a full backup</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-H</option></term>
+  <term><option>--remote-host</option> <replaceable>host</replaceable></term>
+  <listitem>
+    <para>host for <option>--copy</option> and <option>--collect</option></para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-r</option></term>
+  <term><option>--remote-method</option> <replaceable>method</replaceable></term>
+  <listitem>
+    <para>command for copy and collect</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-p</option></term>
+  <term><option>--remote-password</option> <replaceable>password</replaceable></term>
+  <listitem>
+    <para>password for copy and collect</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-A</option></term>
+  <term><option>--remote-password-file</option> <replaceable>file</replaceable></term>
+  <listitem>
+    <para>file containing password for copy and collect</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-P</option></term>
+  <term><option>--remote-path</option> <replaceable>path</replaceable></term>
+  <listitem>
+    <para>path for copy and collect</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-u</option></term>
+  <term><option>--remote-user</option> <replaceable>ident</replaceable></term>
+  <listitem>
+    <para>user for copy and collect</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-R</option></term>
+  <term><option>--rsync-add-option</option> <replaceable>option</replaceable></term>
+  <listitem>
+    <para>additional option to pass to rsync (for copy and collect)</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-s</option></term>
+  <term><option>--set</option> <replaceable>set</replaceable></term>
+  <listitem>
+    <para>set ident. specified by config files in <filename class="directory">/etc/isibackup/<replaceable>set</replaceable>/</filename></para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-i</option></term>
+  <term><option>--since</option> <replaceable>date</replaceable></term>
+  <listitem>
+    <para>differential since <replaceable>date</replaceable></para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>--dir-numbering</option></term>
+  <listitem>
+    <para>number dirs with differential/incremental backups (use this only for testing purposes!)</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>--net</option> <replaceable>net</replaceable></term>
+  <listitem>
+    <para>collect only backups corresponding to hosts in network <replaceable>net</replaceable></para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>--host</option> <replaceable>host</replaceable></term>
+  <listitem>
+    <para>collect only backups corresponding to host <replaceable>host</replaceable></para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>--remote-set</option> <replaceable>set</replaceable></term>
+  <listitem>
+    <para>collect only backups of the set <replaceable>set</replaceable></para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>--remote-mode</option> <replaceable>mode</replaceable></term>
+  <listitem>
+    <para>
+      collect only backups with the mode <replaceable>mode</replaceable>.
+      <replaceable>mode</replaceable> can be <parameter>full</parameter>, <parameter>diff</parameter> or <parameter>incr</parameter>
+    </para>
+  </listitem>
+  </varlistentry>
+</variablelist>
+</refsect1>
+
+<refsect1 id='files'><title>Files</title>
+<simplelist>
+<member><filename>/etc/isibackup/isibackup.conf</filename></member>
+<member><filename>/etc/isibackup/defaults.conf</filename></member>
+<member><filename>/etc/isibackup/<replaceable>set</replaceable>/set.conf</filename></member>
+<member><filename>/etc/isibackup/<replaceable>set</replaceable>/include_files.lst</filename></member>
+<member><filename>/etc/isibackup/<replaceable>set</replaceable>/exclude_files.lst</filename></member>
+<member><filename>/etc/isibackup/<replaceable>set</replaceable>/include_dirs.lst</filename></member>
+<member><filename>/etc/isibackup/<replaceable>set</replaceable>/exclude_dirs.lst</filename></member>
+</simplelist>
+</refsect1>
+
+<refsect1 id='seealso'><title>See Also</title>
+<simplelist type="inline">
+<member><command>cleanbackups</command>(1)</member>
+<member><command>deleteolddiffbackups</command>(1)</member>
+<member><command>deleteoldincrbackups</command>(1)</member>
+<!--<member><command>isibackup</command>(1)</member>-->
+<member><command>isibus</command>(1)</member>
+<member><command>isirestore</command>(1)</member>
+</simplelist>
+</refsect1>
+
+<refsect1 id='reportingbugs'><title>Reporting Bugs</title>
+<para>
+Report bugs to <email>bugs@isibackup.org</email>.
+</para>
+</refsect1>
+
+<refsect1 id='copyright'><title>Copyright</title>
+<simplelist>
+<member>Copyright &copy; 1999-2007 IMSEC GmbH</member>
+<member>Copyright &copy; 2004-2007 Logintas AG</member>
+</simplelist>
+<para>
+This program comes with NO WARRANTY, to the extent permitted by law.
+</para>
+</refsect1>
+
+</refentry>
+

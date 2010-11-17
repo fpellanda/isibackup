@@ -1,0 +1,214 @@
+isibackup (2.0.31) all; urgency=low
+
+  * New release
+  * Removed some more dependencies
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Fri, 13 Aug 2010 15:38:40 +0200
+
+isibackup (2.0.30) all; urgency=low
+
+  * New release
+  * Removed some dependencies for running on lucid
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Fri, 13 Aug 2010 15:33:55 +0200
+
+isibackup (2.0.29) all; urgency=low
+
+  * New release
+  * Exit on unexpected pathlist entry
+  * readlink -f for OPT_TARGET_DIR and OPT_SOURCE_DIR
+  * Fixed variable name when "OPT_RECREATE_ARCHIVE" is true.
+  * Do not exit if pack compress encrypt command fails, report error
+    only.
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Wed, 14 Apr 2010 16:35:19 +0200
+
+isibackup (2.0.28) all; urgency=low
+
+  * New release
+  * Fixed dependencies to libisi
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Thu, 14 Jan 2010 14:41:49 +0100
+
+isibackup (2.0.27) unstable; urgency=low
+
+  * New release
+  * Changed media glob pattern to work with dash and bash.
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Tue, 05 Jan 2010 14:19:21 +0100
+
+isibackup (2.0.26) all; urgency=low
+
+  * New release
+  * Corrected set path not to point to the link.
+  * Exclude pbuilder cache directory from system backup
+  * Exclude googleearcht cache from data backup
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Mon, 28 Dec 2009 11:05:31 +0100
+
+isibackup (2.0.25) all; urgency=low
+
+  * New release
+  * Added --silent deprecated warning.
+  * Isirestore mit tar und files anderer packager werden
+    aurger[_\c3_][_\a4_]umt.
+  * First version with tar packer.
+  * Try if /var/log/isibackup is writable.
+  * Made tar working.
+  * Skip and warn if cpio should handle 4G Files.
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Tue, 10 Nov 2009 10:48:42 +0100
+
+isibackup (2.0.24) all; urgency=low
+
+  * New release
+  * Added logs to /var/log/isibackup
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Wed, 28 Oct 2009 10:59:24 +0100
+
+isibackup (2.0.23) unstable; urgency=low
+
+  * New release
+  * Removed dependency from log4r
+  * Simplified isibackup script (removed secundary logging).
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Wed, 28 Oct 2009 10:49:01 +0100
+
+isibackup (2.0.22) etch; urgency=low
+
+  * New release
+  * Precreate log file to avoid unfinished writing on full disks
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Mon, 05 Oct 2009 10:49:03 +0200
+
+isibackup (2.0.21) etch; urgency=low
+
+  * New release
+  * Give default sets if no sets can be found by backup.rb
+  * Added missingok to logrotate.
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Wed, 26 Aug 2009 16:57:04 +0200
+
+isibackup (2.0.20) etch; urgency=low
+
+  * New release
+  * Do ignore state lines that do not match exact count of fields.
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Wed, 26 Aug 2009 10:43:48 +0200
+
+isibackup (2.0.19) etch; urgency=low
+
+  * New release
+  * Fixed incremental mysql backup.
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Tue, 09 Jun 2009 22:47:45 +0200
+
+isibackup (2.0.18) etch; urgency=low
+
+  * New release
+  * Isirestore for directories.
+  * Fixed copy bug.
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Thu, 28 May 2009 10:06:45 +0200
+
+isibackup (2.0.17) unstable; urgency=low
+
+  * New release
+  * Small fix for :copy mode.
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Mon, 25 May 2009 10:10:17 +0200
+
+isibackup (2.0.16) unstable; urgency=low
+
+  * New release
+  * Reenabled copy mode with collect code.
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Tue, 19 May 2009 10:25:11 +0200
+
+isibackup (2.0.15) etch; urgency=low
+
+  * New release
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Mon, 18 May 2009 18:32:31 +0200
+
+isibackup (2.0.14) unstable; urgency=low
+
+  * Added to_s function to backup.rb
+  * Ignore backups in isirestore with have missing incrementals.
+  * Tidied up changlog after isirelease added all changes.
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Mon, 18 May 2009 18:32:03 +0200
+
+isibackup (2.0.12) etch; urgency=low
+
+  * work on isibackup-dialog
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Wed, 06 May 2009 10:35:15 +0200
+
+isibackup (2.0.11) etch; urgency=low
+
+  * Claim errors when isibackup-main did not successfuly exit in isibackup. (exitvalue)
+  * Added isibackup-dialog script
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Tue, 05 May 2009 16:26:38 +0200
+
+isibackup (2.0.9) etch; urgency=low
+
+  * fixed bug that control file could not be parsed
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Fri, 24 Apr 2009 14:47:20 +0200
+
+isibackup (2.0.8) etch; urgency=low
+
+  * added set keys to package
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Fri, 17 Apr 2009 11:52:30 +0200
+
+isibackup (2.0.7) etch; urgency=low
+
+  * removed libisi and added depency to the new package
+  * added set keys
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Fri, 17 Apr 2009 11:28:04 +0200
+
+isibackup (2.0.6) etch; urgency=low
+
+  * Better incremental error claim.
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Tue, 07 Apr 2009 17:36:35 +0200
+
+isibackup (2.0.5) etch; urgency=low
+
+  * version for publishing
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Tue, 07 Apr 2009 14:09:05 +0200
+
+isibackup (2.0.4) etch; urgency=low
+
+  * reimplemented collect
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Wed, 01 Apr 2009 15:34:13 +0200
+
+isibackup (2.0.3) etch; urgency=low
+
+  * added isibackup-info and new deleteoldbackups
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Wed, 01 Apr 2009 10:54:32 +0200
+
+isibackup (2.0.2) etch; urgency=low
+
+  * isirestore verbesserung
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Fri, 27 Mar 2009 16:26:56 +0100
+
+isibackup (2.0.1) etch; urgency=low
+
+  * added isirestore script
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Thu, 26 Mar 2009 18:06:41 +0100
+
+isibackup (2.0.0beta) etch; urgency=low
+	  
+  * Rewritten in ruby
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Tue, 20 Jan 2009 11:14:38 +0100

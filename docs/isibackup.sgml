@@ -1,0 +1,1903 @@
+<!DOCTYPE article PUBLIC "-//OASIS//DTD DocBook V3.1//EN" [
+  <!ENTITY debian	"<productname>Debian</productname>">
+  <!ENTITY gnu		"<acronym>GNU</acronym>">
+
+  <!ENTITY samba	"<productname>samba</productname>">
+  <!ENTITY debconf	"<productname>debconf</productname>">
+  <!ENTITY imsec	"IMSEC GmbH">
+  <!ENTITY package	"isibackup">
+  <!ENTITY Package	"ISiBackup">
+
+  <!ENTITY isimount	"<productname>isimount</productname>">
+  <!ENTITY mount-host	"<command>mount-host</command>">
+  <!ENTITY mount-iso	"<command>mount-iso</command>">
+  <!ENTITY ISiBackup	"<productname>ISiBackup</productname>">
+  <!ENTITY isibackup	"<command>isibackup</command>">
+
+  <!ENTITY synopse-verbosity '
+	  <group>
+	    <arg><option>-v</option></arg>
+	    <arg><option>--verbose</option></arg>
+	  </group>
+	  <group>
+	    <arg><option>-w</option></arg>
+	    <arg><option>--debug</option></arg>
+	  </group>
+	  <group>
+	    <arg><option>-q</option></arg>
+	    <arg><option>--quiet</option></arg>
+	  </group>
+	  <group>
+	    <arg><option>-l </option><replaceable>file</replaceable></arg>
+	    <arg><option>--log </option><replaceable>file</replaceable></arg>
+	  </group>
+	'>
+
+  <!ENTITY synopse-help '
+	<group>
+	  <arg>-h</arg>
+	  <arg>--help</arg>
+	</group>
+	<arg>--version</arg>
+	'>
+]>
+
+<article>
+ <artheader>
+  <title>&ISiBackup; Documentation</title>
+  
+  <revhistory>
+   <!-- Add new revisions here-->
+   <revision>
+    <revnumber>1.4.9-8</revnumber>
+    <date>2004-10-04</date>
+    <authorinitials>mh</authorinitials>
+    <revremark>
+     Documentation completion, concerning debian package isibackup-1.4.9-8; Corrections in spelling; changes due to program changes
+    </revremark>
+   </revision>
+   <revision>
+    <revnumber>1.4.5</revnumber>
+    <date>2004-02-14</date>
+    <authorinitials>mh</authorinitials>
+    <revremark>
+     Documentation completion, concerning debian package isibackup-1.4.5
+    </revremark>
+   </revision>
+   <revision>
+    <revnumber>1.4.3</revnumber>
+    <date>2004-02-13</date>
+    <authorinitials>mh</authorinitials>
+    <revremark>
+     Documentation completion, concerning debian package isibackup-1.4.3
+    </revremark>
+   </revision>
+   <revision>
+    <revnumber>1.4.1</revnumber>
+    <date>2004-02-07</date>
+    <authorinitials>mh</authorinitials>
+    <revremark>
+     Major documentation rework, concerning debian package isibackup-1.4.1
+    </revremark>
+   </revision>
+   <revision>
+    <revnumber>1.4</revnumber>
+    <date>2003-08-21</date>
+    <authorinitials>mh</authorinitials>
+    <revremark>
+     First public relase.
+    </revremark>
+   </revision>
+   <revision>
+    <revnumber>0.1</revnumber>
+    <date>2002-09-24</date>
+    <authorinitials>sh</authorinitials>
+    <revremark>
+     Copy from isitools manual
+    </revremark>
+   </revision>
+  </revhistory>
+  
+  <copyright>
+   <year>2004</year>
+   <holder>IMSEC GmbH</holder>
+  </copyright>
+  
+  <author>
+   <honorific>Dr</honorific>
+   <firstname>Marcus</firstname>
+   <surname>Holthaus</surname>
+   <affiliation>
+    <address>
+     <email>marcus.holthaus@imsec.ch</email>
+    </address>
+   </affiliation>
+  </author>
+  
+  <author>
+   <firstname>Simon</firstname>
+   <surname>Huerlimann</surname>
+   <affiliation>
+    <address>
+     <email>simon.huerlimann@imsec.ch</email>
+    </address>
+   </affiliation>
+  </author>
+  
+  <abstract>
+   <indexterm>
+    <primary>Abstract</primary>
+   </indexterm>
+   
+   <para>
+    &ISiBackup; is a backup program.
+   </para>
+   <para>
+    It is capable of backing up any collection of directories inside a filesystem to any other single location 
+    in a file system. It can handle system and data differently. it allows for full, incrementatal and
+     differential backups.
+    <para>
+    <abbrev>ISi</abbrev> is an abbreviation for the german term
+    <foreignphrase>Informations-Sicherheit</foreignphrase>, which is <foreignphrase>information security</foreignphrase> in
+    english. Furthermore, the german pronounciation of <abbrev>isi</abbrev> is like
+    the english one of <abbrev>easy</abbrev>.
+   </para>
+  </abstract>
+ </artheader>
+ <warning>
+  <para>
+   Warning and Disclaimer: As with all software that leaves a closed environment to earn its merits in the
+   wild wild world, there have to be errors and malfunctions in this software that prevent a successful
+   use and that may even damage your system. While we are interested in getting to know these 
+   malfunctions so that we can fix them, we can not in any form take responsibility for what it
+   does to your system, nor can we promise to do remove these bugs, and hence if you use this software, 
+   it's on your own risk. 
+  </para>
+ </warning>
+ 
+ <sect1 id="overview">
+  
+  <title>Overview</title>
+  <indexterm>
+   <primary>Overview</primary>
+  </indexterm>
+  
+  <para>
+   ISiBackup's primary intention is to save the data on a system. Its
+   secondary goal is to allow for a quick recovery from a fatal system
+   failure, e.g. as the result of hard drive crash or even sabotage
+   like the one that can be caused by hacking attacks. The third goal is to provide a backup
+   infrastructure that allows you to use it in many different ways to manage your backups. We are
+   by no way near that third goal yet.
+   </para>
+
+  <sect2 id="history">
+   <title>History</title>
+   
+   <para>
+    ISiBackup was originally developed by the author to make backups of
+    the data on his computer. As with many programs, the requirements
+    grew over time, and so did the features of the program.
+    Furthermore, in the beginning, it was OK to just copy the script
+    to every new one of his computers, while later, when keeping track
+    of the distributed versions became hard, the debian package
+    management system was utilized to provide for a consistent
+    release management. The first script was created in 1996 for his
+    then sole linux machine. Debianization first took place in
+    1999 and was done by Simon H&uuml;rlimann, a then employee of Marcus's
+    company IMSEC GmbH.
+    
+   </para>
+   <para>
+    The ISiBackup scripts were adapted / updated / splitted-up / merged a lot
+    over time. Version 1.4 was the first one-package release that
+    ever left the original environment.
+    The authors invested a lot of work into the
+    <wordasword>professionalisation</wordasword> of these tools.
+    They added documentation (man, info, DocBook, ...), unified
+    command-line interfaces, packaging for debian (.deb) and other stuff. Development continues,
+    the wish list is long.</para>
+  </sect2>
+
+  <sect2 id="features">
+   <title>Features</title>
+   <para>
+    ISiBackup has the following features:
+    <itemizedlist>
+     <listitem><para>creation of backups of data (files, directories) to a directory</para></listitem>
+     <listitem><para>compression of files</para></listitem>
+     <listitem><para>encryption of files</para></listitem>
+     <listitem><para>remote storage (push) and remote fetching (pull) of backup
+      data</para></listitem>
+     <listitem><para>handling of sets of files</para></listitem>
+     <listitem><para>support for full, incremental and differential
+      backups</para></listitem>
+      <listitem><para>in-place refresh of previously created backups</para></listitem>
+    </itemizedlist>
+    ISiBackup is more or less one script with lots of parameters and commmands.
+    Additional scripts are avaliable (and part of the package) for
+    <itemizedlist>
+     <listitem><para>restoring data from a backup (<computeroutput>isirestore</computeroutput>)</para></listitem>
+     <listitem><para>calculation the occupied backup space (<computeroutput>isibus</computeroutput>)</para></listitem>
+     <listitem><para>reminding the change of backup disk (<computeroutput>isiremind</computeroutput>)</para></listitem>
+     <listitem><para>mailing the success or failures of executed programs(<computeroutput>isibackupsize</computeroutput>)</para></listitem>
+     <listitem><para>managing the removal of old backups after new ones are available (<computeroutput>deleteoldbackups, deleteolddiffbackups</computeroutput>)
+    </itemizedlist>
+    Futhermore, it bears the common features of linux programs, such as
+    <itemizedlist>
+     <listitem><para>integration in debian environment with crontab and
+      logrotate entries</para></listitem>
+     <listitem><para>logging</para></listitem>
+     <listitem><para>integrated use of tar, zip, bzip2, gzip, gnupg and pgp as
+      available on the system</para></listitem>
+    </itemizedlist>
+    Planned features include
+    <itemizedlist>
+     <listitem><para>auto deletion of obsolete backups</para></listitem>
+     <listitem><para>integration of <computeroutput>mkisofs</computeroutput> to automatically create iso image files</para></listitem>
+    </itemizedlist>
+    It's funny that by using ISiBackup,
+    <itemizedlist>
+     <listitem><para>the replication of a system becomes easy (just backup on
+      one system and restore on another)</para></listitem>
+     <listitem><para>the archivation of data is supported</para></listitem>
+    </itemizedlist>
+    The most notable property of ISiBackup ist that it does not pack
+    all of the source into one giant archive, and not even into a
+    set of volumes, but in that its result is a directory tree (almost) identical
+    to the backed up source directory tree. The main difference is
+    that in the backup tree, the files are (usually) collected into
+    one file per directory, that they are (usually) compressed and
+    (optionally) encrypted. By keeping the directory structure intact,
+    <itemizedlist>
+     <listitem><para>file handling is easier (no huge file operations necessary),</para></listitem>
+     <listitem><para>the backup can be stored to the same file system types as the original 
+      (no large file support needed if not already needed for the source),</para></listitem>
+     <listitem><para>the backup can easily be split up (just move some of the backup directories 
+       to one medium, and some others to the next one), and</para></listitem>
+     <listitem><para>restoration of files is easily done by just directly applying the standard unzip, gpg or tar
+      tools that were used in creating the backup (alternatively, there is an isirestore script).</para></listitem>
+    </itemizedlist>
+   </para>
+
+  </sect2>
+  
+  <sect2 id="copyright">
+   <title>Copyright Information</title>
+   
+   <para>
+    This document is copyrighted (c) 1999-2004 by &imsec;. 
+   </para>
+  </sect2>
+  
+  <sect2 id="disclaimer">
+   <title>Disclaimer</title>
+   
+   <para>
+    No liability for the contents of this documents can be accepted.
+    Use the concepts, examples and other content at your own risk.
+    As this is a new edition of this document, there may be errors
+    and inaccuracies, that of course might be damaging your system.
+    Proceed with caution, and although this is highly unlikely,
+    the author(s) do not take any responsibility for any consequences
+    of the use of this program.
+   </para>
+   
+   <para>
+    All copyrights are held by their by their respective owners, unless
+    specifically noted otherwise.  Use of a term in this document
+    should not be regarded as affecting the validity of any trademark
+    or service mark.
+   </para>
+   
+   <para>
+    Naming of particular products or brands should not be seen
+    as endorsements.
+   </para>
+  </sect2>
+ </sect1>
+ 
+ <sect1 id="installation">
+  <title>Installation</title>
+  <para>
+   ISiBackup installs like any other debian package, using the package
+   systems with tools like aptitude or apt-get.
+  </para>
+  <para>
+   As long as isibackup is not part of any distribution, it will be
+   stored on the isibackup home site at
+   <ulink url="http://www.isibackup.org">http://www.isibackup.org</ulink>. In case you would like to
+   add a source line to your
+   <computeroutput>/etc/apt/sources.list</computeroutput>, it would be
+   </para>
+  <programlisting>
+   deb http://www.isibackup.org/debian/ unstable/
+   deb-src http://www.isibackup.org/debian/ unstable/
+  </programlisting>
+  <warning>
+   <para>Please be aware that upon installation, isibackup changes the
+    ownership of all isibackup related files, such as
+    <itemizedlist>
+     <listitem><para>the configuration files below<computeroutput>/etc/backup</computeroutput>,</para></listitem>
+     <listitem><para>all of the pre-existing backups main directories below <computeroutput>/var/backups/isibackup</computeroutput> (next
+    three levels)</para></listitem>
+     <listitem><para>all of the log files inside
+      <computeroutput>/var/log/isibackup</computeroutput></para></listitem>
+    </itemizedlist>
+    to <computeroutput>$IDENT_USER_BACKUP:$IDENT_GROUP_BACKUP</computeroutput> which defaults to 
+    <computeroutput>backup:backup</computeroutput>. Furthermore, it changes
+    <itemizedlist>
+     <listitem><para> the directory modes to <computeroutput></computeroutput>, defaulting to <computeroutput>rwxrws---</computeroutput>
+     <listitem><para> the file modes to <computeroutput></computeroutput>, defaulting to <computeroutput>rw-rw----</computeroutput>.
+    </itemizedlist>.
+    Of course, this will not be done if configured differently inside
+    <computeroutput>/etc/isibackup/isibackup.conf</computeroutput>.
+  </warning>
+ </sect1>
+
+ <sect1 id="configurationfiles">
+  <title>Configuration Files</title>
+  <para>
+   With the installation of ISiBackup, you get these directories and
+   files and need / should have these other packages installed:
+   <table colsep=1 frame=all
+    pgwide=1 rowsep=1 tocentry=1>
+    <title>ISiBackup Files and Directories</title>
+    <tgroup cols=3 align=left>
+     <colspec colname=type colwidth=10pc>
+      <colspec colname=name colwidth=30pc>
+       <colspec colname=description colwidth=60pc>
+	<thead>
+	 <row>
+	  <entry>Type</entry>
+	  <entry>Name</entry>
+	  <entry>Description</entry>
+	 </row>
+	</thead>
+	<tbody valign=top>
+	 <row>
+	  <entry>Dir</entry>
+	  <entry><computeroutput>/etc/isibackup/</computeroutput></entry>
+	  <entry>Main configuration directory, all general parameters
+	   and set definitions are stored here</entry>
+	 </row>
+	 <row>
+	  <entry>File</entry>
+	  <entry><computeroutput>/etc/isibackup/isibackup.conf</computeroutput></entry>
+	  <entry>Main ISiBackup configuration file. All general
+	   definitions and declarations go here.</entry>
+	 </row>
+	 <row>
+	  <entry>Dirs</entry>
+	  <entry><computeroutput>/etc/isibackup/data_linux, /etc/isibackup/host_linux,
+	  /etc/isibackup/host_windows, /etc/isibackup/all, /etc/isibackup/collect</computeroutput></entry>
+	  <entry>Set configuration directories for the <computeroutput>data_linux,
+	   host_linux, host_windows</computeroutput> and <computeroutput>all</computeroutput> set, respectively. Add
+	   your own set by creating a directory for it.</entry>
+	 </row>
+	 <row>
+	  <entry>File</entry>
+	  <entry><computeroutput>/etc/isibackup/{Set}/set.conf</computeroutput></entry>
+	  <entry>Backup set definitions for each individual set. The
+	   values in this file override the ones in the main
+	   configuration file <computeroutput>/etc/isibackup.conf</computeroutput></entry>
+	 </row>
+	 <row>
+	  <entry>Files</entry>
+	  <entry><computeroutput>/etc/isibackup/{Set}/include_dirs.lst,
+	   include_files.lst, exclude_dirs.lst, include_files.lst</computeroutput></entry>
+	  <entry>Directory and file selections for the individual
+	   sets. These determine which files will be backuped and
+	   which will not.</entry>
+	 </row>
+	 <row>
+	  <entry>Dir</entry>
+	  <entry><computeroutput>/var/backups/isibackup/</computeroutput></entry>
+	  <entry>Backup directory; the backuped files go here</entry>
+	 </row>
+	 <row>
+	  <entry>Dir</entry>
+	  <entry><computeroutput>/var/log/isibackup/</computeroutput></entry>
+	  <entry>Log directory; each backup run generates a file
+	   here</entry>
+	 </row>
+	 <row>
+	  <entry>File</entry>
+	  <entry><computeroutput>/usr/bin/isibackup</computeroutput></entry>
+	  <entry>Main backup script. This is a bash script that
+	   contains almost all of the functions needed to create a backup</entry>
+	 </row>
+	 <row>
+	  <entry>Dir</entry>
+	  <entry><computeroutput>/usr/bin/isibus</computeroutput></entry>
+	  <entry>A script to calculate the size of already created
+	   backups inside the backup directory. It employs <computeroutput>du</computeroutput> to
+	   calculate the size and then sleeps for a period of time.</entry>
+	 </row>
+	 <row>
+	  <entry>File</entry>
+	  <entry><computeroutput>/usr/bin/isirestore</computeroutput></entry>
+	  <entry>Backup script to restore a previously created backup
+	   to an arbritary location</entry>
+	 </row>
+	 <row>
+	  <entry>File</entry>
+	  <entry><computeroutput>/etc/logrotate.d/isibackup</computeroutput></entry>
+	  <entry>Log rotation entry for ISiBackup log files. This more
+	  or less restricts their number and size.</entry>
+	 </row>
+	 <row>
+	  <entry>File</entry>
+	  <entry><computeroutput>/etc/cron.d/isibackup</computeroutput></entry>
+	  <entry>Cron table for ISiBackup. This is how ISiBackup is
+	   automatically called to create a backup.</entry>
+	 </row>
+	 <row>
+	  <entry>File</entry>
+	  <entry><computeroutput>/usr/share/man/man1/isibackup.1.gz</computeroutput></entry>
+	  <entry>ISiBackup Man Page, automatically generated from the
+	   output of <computeroutput>isibackup --help</computeroutput></entry>
+	 </row>
+	 <row>
+	  <entry>Dir</entry>
+	  <entry><computeroutput>/usr/share/doc/isibackup</computeroutput></entry>
+	  <entry>ISiBackup documentation as TXT, HTML, PS, PDF (the source
+	   is in DocBook in the source package), including README,
+	   copyright, changelog etc.</entry>
+	 </row>
+	 <row>
+	  <entry>Dir</entry>
+	  <entry><computeroutput>/usr/share/doc-base/isibackup</computeroutput></entry>
+	  <entry>(to be written)</entry>
+	 </row>
+	 <row>
+	  <entry>Package Dependency</entry>
+	  <entry><computeroutput>libisi</computeroutput></entry>
+	  <entry>ISiBackup uses logging logic that has been outsourced
+	   to this package. Therefore, this package is mandatory,
+	   but there's not much magic inside. ISiBackup does not use
+	   the configuration file interpretation logic in libisi.</entry>
+	 </row>
+	 <row>
+	  <entry>Package Dependency</entry>
+	  <entry><computeroutput>isitools</computeroutput></entry>
+	  <entry>ISiBackup is used in a framework of other "isi"
+	   tools, so it was logical to collect those in their own package. See
+	   this package's documetation for further information.</entry>
+	 </row>
+	 <row>
+	  <entry>Package dependency</entry>
+	  <entry><computeroutput>shellutils, fileutils, corutils, stat</computeroutput></entry>
+	  <entry>ISiBackup needs at least the
+	   <computeroutput>stat</computeroutput> command to
+	   determine the size of files it should backup. The various
+	   dependencies are duu to the various distributions ISiBackup
+	   should run in, as there are currently woody, sarge, sid.</entry>
+	 </row>
+	 <row>
+	  <entry>Package dependency</entry>
+	  <entry><computeroutput>procmail</computeroutput></entry>
+	  <entry>ISiBackup relies on the lockfile command from the
+	   procmail package to ensure that the same ISIBackup set is
+	   not backuped twice in parallel - this might generate
+	   nonsense backup files and render the backup
+	   useless. However, it is perfectly OK to backup two
+	   different sets simultaneously.</entry>
+	 </row>
+	 <row>
+	  <entry>Package suggestion</entry>
+	  <entry><computeroutput>zip, unzip</computeroutput></entry>
+	  <entry>ISiBackup can employ the pkzip and pkunzip methods to
+	   compress the backup files it creates. Of course those
+	   methods must be available, hence this suggestion.</entry>
+	 </row>
+	 <row>
+	  <entry>Package suggestion</entry>
+	  <entry><computeroutput>bzip2</computeroutput></entry>
+	  <entry>ISiBackup can employ the bzip2 and bunzip2 methods to
+	   compress the backup files it creates. Of course those
+	   methods must be available, hence this suggestion.</entry>
+	 </row>
+	 <row>
+	  <entry>Package suggestion</entry>
+	  <entry><computeroutput>gnupg, pgp, pgp5</computeroutput></entry>
+	  <entry>ISiBackup can employ GnuPG, PGP or PGP5 to encrypt
+	   the backup files it creates. Of course those
+	   methods must be available, hence this suggestion.</entry>
+	 </row>
+	 <row>
+	  <entry>Package suggestion</entry>
+	  <entry><computeroutput>rsync, lftp</computeroutput></entry>
+	  <entry>ISiBackup can employ the rsync and ftp methods to
+	   upload (push) or download (pull) the backup files it creates. Of course those
+	   methods must be available, hence this suggestion.</entry>
+	 </row>
+	</tbody>
+    </tgroup>
+   </table>
+  </para>
+ </sect1>
+
+ <sect1 id="usingisibackup">
+  <title>Using &ISiBackup;</title>
+  <sect2 id="synapsis">
+   <title>Synapsis</title>
+   <para>
+   As you already might have tried, just calling
+   <programlisting>isibackup</programlisting>
+   is equivalent to calling
+   <programlisting>isibackup --help</programlisting>
+   and dows not yet create a backup. It shows isibackup call synapsis, which is
+   <programlisting>
+   </programlisting>
+  </sect2>
+  <sect2 id="simplebackup">
+   <title>Simple Backup</title>
+   <para>The simplest way to use ISiBackup is to call it with the
+    <computeroutput>backup</computeroutput> and the indication of one
+    set, like
+    <programlisting>isibackup --backup --set data_linux</programlisting>
+   </para>
+  </sect2>
+  <sect2 id="backupresults">
+   <title>Backup results</title>
+   <para>
+    ISiBackup records most of the parameters that were used in
+    creating the backup as part of the backup. To do so, it creates a
+    directory called <computeroutput>_isibackup</computeroutput> in the root of the backup target directory.
+    (Rest to be written; contents of isibackup subdir on target)
+   </para>
+  </sect2>
+  <sect2 id="output">
+   <title>Display</title>
+   <para>During the backup run, ISiBackup display a pregress
+    indication. It consists of exactly 101 steps (each of the
+    percentage values from 0% to 100%) if there are more than 100
+    directories to backup, and less steps if there are
+    less. Additionally, ISiBackup outputs the current directory name
+    when it reaches one of the percentage steps. In between thes
+    steps, it just outputs a "+" sign in case it created a new backup target
+    file, and a "." sign in case it refreshed a backup target
+    file. (Accordingly, the cumulated number of "+" and "." signs must
+    equal the number of directories to backup).
+   </para>
+  </sect2>
+ </sect1>
+
+ <sect1 id="howitworks">
+  <title>How it works</title>
+  <para>ISiBackup is not magic. It is, more or less, a wrapper script
+   for collection, compression and encryption tools. ISiBackup runs in
+   five phases:
+   <orderedlist>
+    <listitem><para>Initialisation, configuration file and command line options interpretation</para></listitem>
+    <listitem><para>Directory selection</para></listitem>
+    <listitem><para>For each directory
+      <itemizedlist>
+       <listitem><para>File selection</para></listitem>
+       <listitem><para>Collection</para></listitem>
+       <listitem><para>Compression</para></listitem>
+       <listitem><para>Encryption</para></listitem>
+      </itemizedlist>
+     </para></listitem>
+    <listitem><para>Statistics</para></listitem>
+   </orderedlist>
+  </para>
+
+  <sect2 id="initialization">
+   <title>Initialisation</title>
+   <para>The initiaisation sequence is approximately:
+    <itemizedlist>
+     <listitem>
+      <para>Primary setting of a lot of internal constants,
+       e.g. network, host and date constanst, paths
+       to expected programs, maximum file and directory sizes, names
+       for temporary files etc.
+      </para>
+     </listitem>
+     <listitem>
+      <para>Determination of one of the four main commands:
+       <itemizedlist>
+	<listitem>
+	 <para>
+	  <computeroutput>--backup</computeroutput>
+	  starts a backup (it needs more arguments)
+	 </para>
+	</listitem>
+	<listitem>
+	 <para>
+	  <computeroutput>--copy</computeroutput> starts
+	  the copying of backup data to another system
+	 </para>
+	</listitem>
+	<listitem>
+	 <para>
+	  <computeroutput>--help</computeroutput> shows
+	  the command line help and exits
+	 </para>
+	</listitem>
+	<listitem>
+	 <para>
+	  <computeroutput>--version</computeroutput> shows
+	  the program version and exits
+	 </para>
+	</listitem>
+       </itemizedlist>
+      </para>
+      <para>
+       <computeroutput>--backup</computeroutput> and
+       <computeroutput>--copy</computeroutput> can be combined in order
+       to have the newly created backup being pushed to another machine.
+      </para>
+     </listitem>
+     <listitem>
+      <para>Fetching all the other command
+       line parameters
+      </para>
+     </listitem>
+     <listitem>
+      <para>Detailed initialization in function <computeroutput>init_program</computeroutput>:
+       <itemizedlist>
+	<listitem>
+	 <para>sourcing general configuration file
+	  <computeroutput>/etc/isibackup/isibackup.conf</computeroutput>
+	 </para>
+	</listitem>
+	<listitem>
+	 <para>sourcing the set configuration file
+	  <computeroutput>/etc/isibackup/{Set}/set.conf</computeroutput>, where the set hast been given with <computeroutput>--set {Set}</computeroutput>
+	 </para>
+	</listitem>
+       </itemizedlist>
+      </para>
+     </listitem>
+     <listitem>
+      <para>Check if there is another instance of the same
+       set running; if so, abort.
+      </para>
+     </listitem>
+     <listitem>
+      <para>Initialize the log files (main and error)
+      </para>
+     </listitem>
+     <listitem>
+      <para>Start the actual backup process
+      </para>
+     </listitem>
+    </itemizedlist>
+   </para>
+  </sect2>
+
+  <sect2 id="selection">
+   <title>Directory selection</title>
+   <para>
+    This takes place inside the
+    <computeroutput>do_backup</computeroutput> function.
+   </para>
+   <para>
+    <itemizedlist>
+     <listitem><para>Determine the input pattern for the Directory
+       selection. The directories can be selected using the
+       configuration file
+       <computeroutput>/etc/isibackup/{Set}/include_dirs.lst</computeroutput>. Alternatively, the <computeroutput>fstab</computeroutput> can be used as the the source of all directories to backup (this is used by the set <computeroutput>all</computeroutput>), or the output of the <computeroutput>mount</computeroutput> command can be used.</para></listitem>
+     <listitem><para>Is the selected compression method
+       (<computeroutput>CMD_PACK</computeroutput>) avaliable
+       as command (e.g., is <computeroutput>zip</computeroutput> etc. installed?)</para></listitem>
+     <listitem><para>Is the selected encryption method
+       (<computeroutput>CMD_CRYPT</computeroutput>) avaliable as
+       command (e.g. is <computeroutput>gpg</computeroutput>
+       etc. installed?) and is the key needed for encryption
+       (<computeroutput>CRYPT_KEY</computeroutput>) available?</para></listitem>
+     <listitem><para>Determine the date of the last full backup in
+       order to be able to do a differential backup</para></listitem>
+     <listitem><para>Make sure the target directory is avaliable and
+       can be written</para></listitem>
+     <listitem><para>Record the settings and backup start
+       time. ISiBackup records most of the parameters it was called
+       with so that later identification of those parameters is possible.</para></listitem>
+     <listitem><para>Create the list of directories to be backed
+       up. This is a loop through all the mounted volumes, or those
+       given in fstab, or those directories given in include_dirs.lst,
+       using <computeroutput>find</computeroutput>. In case of the
+       <computeroutput>include_dirs.lst</computeroutput> list, it is easily possible to use shell
+       patterns to select directories. </para>
+      <para>The <computeroutput>find</computeroutput> results in a list of all subdirectories of all
+       those volumes/directories. This is saved in a file ending on
+       <computeroutput>.out</computeroutput>. Additionally, we not
+       just search for the entries themselves, but due to restrictions
+       (or features?) of bash, we also search for them qouted. That
+       way, we get directory names like <computeroutput>"My Documents"</computeroutput>, wheras a find
+       for <computeroutput>My Documents</computeroutput> equals a find
+       for <computeroutput>My</computeroutput>, followed by a find for
+       <computeroutput>Documents</computeroutput>. These two will
+       probably not render any files. By doing two searches, double
+       entries are probable, and get removed immediately.</para></listitem>
+     <listitem><para>The next step is the removal of the directories
+       from <computeroutput>exclude_dirs.lst</computeroutput>. This is
+       done using <computeroutput>egrep</computeroutput>, hence any
+       regular expression is allowed in these files (but not shell patterns).</para></listitem>
+     <listitem><para>The whole process renders five files containing
+       directory names:
+       <orderedlist>
+	<listitem><para><computeroutput>.in</computeroutput>: The list
+	  of patterns used as input</para></listitem>
+	<listitem><para><computeroutput>.out</computeroutput>: The
+	  result of the find before the exclusion</para></listitem>
+	<listitem><para><computeroutput>.full.sorted</computeroutput>:
+	  The same list, sorted and without double entries</para></listitem>
+	<listitem><para><computeroutput>.filtered</computeroutput>:
+	  The final list of directories to backup</para></listitem>
+	<listitem><para><computeroutput>.skipped</computeroutput>: The
+	  rest, i.e. those directories that will not get backuped</para></listitem>
+       </orderedlist>
+      </para>
+     </listitem>
+     <listitem><para>Finally, a special "directory list" item is
+       appended to the list. This is due to the fact that we do not
+       actually backup directories, but files. Hence, while we are
+       able to preserver all the files's ownerships and permissions,
+       we lose that for all directories. So this special entry later
+       triggers the creation of a backup of all directories, including
+       their ownerships and permissions, while excluding all the files
+       inside them. This <computeroutput>DIRLIST_ENTRY</computeroutput> defaults to <computeroutput>###isibackup-dirlist###</computeroutput>
+      </para>
+     </listitem>
+    </itemizedlist>
+   </para>
+  </sect2>
+  <sect2 id="dirprocessing">
+   <title>Directory Processing</title>
+   <para>
+    Now the backup of the individual directories starts, using the
+    steps of "file selection", "collection", "compression" and "encryption".
+   </para>
+   <sect3 id="filesel">
+    <title>File selection</title>
+    <para>
+     File selection determines what files to backup.
+     <itemizedlist>
+      <listitem><para>In case of a differential backup, we have to
+	backup only files that have changed after the last full
+	backup. As file selecion uses the
+	<computeroutput>find</computeroutput> comamnd as well, we add
+	the parameters of <computeroutput>-newer
+	 {Date}</computeroutput>, where {Date} is the date of the last
+       full backup (which was determined during intialisation).</para></listitem>
+      <listitem><para>Resetting the statistic counters allowes for a
+	progress indication later.</para></listitem>
+      <listitem><para>Now the loop through the selected directories begins.</para></listitem>
+      <listitem><para>First, the current statistic values are fetched
+	and progress is shown.</para></listitem>
+      <listitem><para>Source and target directory are stripped of
+	double slashes and characters incompatible with the VFAT
+	filesystem are converted
+	(<computeroutput>recodeVFATChars</computeroutput>) in order to
+       prevent later write errors [This is due to the fact that at
+	IMSEC, early target directories were on VFAT filesystems]. The
+       only character currently being replaced is the colon
+	(<computeroutput>:</computeroutput>). The replacement is the
+	sequence <computeroutput>%1A</computeroutput>.</para></listitem>
+      <listitem><para>The target directory is created. Before doing
+	so, it checked wheter the name fits inside the name length
+	restrictions. This is given as 220 in
+	<computeroutput>MAX_PATHLEN</computeroutput>, but may be
+	overridden inside the configuration files. Be aware that by
+	placing the backup directory inside the tree somewhere, the
+	path length grows by the number of characters in that path!
+	The limit is not as far away as it may seem. Paths longer than
+	this limit will just be skipped and will not be part of the
+	backup (however, a warning will be displayed).</para></listitem>
+     </itemizedlist>
+    </para>
+   </sect3>
+   <sect3 id="collection">
+    <title>Collection</title>
+    <itemizedlist>
+     <listitem><para>The function
+       <computeroutput>createFileList</computeroutput> is used to
+       determine the files to be backuped inside this directory.</para></listitem>
+     <listitem><para>In case the list of include file patterns (from
+       <computeroutput>include_files.lst</computeroutput>) is empty,
+       all files in the directory will be found, otherwise a loop
+       thorugh all the include patterns makes sure just those files
+       are selected that match. In any case, the "-newer" restrictino
+       from above applies in case of a differential backup.</para></listitem>
+     <listitem><para>The next step is to exclude all files from the
+       file exclusion list in
+       <computeroutput>exclude_files.lst</computeroutput>. If no
+       pattern was defined, no exclusion takes place, i.e. the file
+       selection remains the same.</para></listitem>
+     <listitem><para>If the file selection renders an empty list (no
+       inclusion, or too many exclusions, or no newer files in case of differential
+       backup, the actual process of backing up the files is skipped,
+       and an empty target directory remains (it will be deleted
+       later).</para></listitem>
+     <listitem>
+      <para>The normal mode of operation is to pack the
+       files inside the directory into one single archive, which is
+       called "collect". The program
+       <computeroutput>tar</computeroutput> is a typical
+       collector.
+      </para>
+      <para>But there is a a second operating mode called
+       ""separate". When the "collect" runs into size limitations
+       (imagine a directory with two or more files of 1.5 GB each),
+       the mode is switched from "collect" to handling
+       a per-file basis (mode "separate"), that is, each file is
+       being put into its own archive instead of being collected
+       with the others in this directory. So in "collect" we end up
+       with one file per directory, whereas in "separate", we get as many files as
+       there were before. The definition of "site limitations" is
+       given in the constant
+       <computeroutput>MAX_FSFILESIZE</computeroutput>, which
+       defaults to 2 GB, but can be overridden in any of the two
+       configuration files.</para>
+      <para>To check if we run into size trouble, we first need to
+       count the files and sum their sizes. 
+       But let's look into that step by step.
+      </para>
+     </listitem>
+     <listitem><para>As explained above, the
+       <computeroutput>DIRLIST_ENTRY</computeroutput> is used to
+       backup the directory information. This needs space as well
+       and goes into the size calculations with
+       <computeroutput>DEF_PACKEDBLOCKSIZE</computeroutput> per
+       directory.(<computeroutput>DEF_PACKEDBLOCKSIZE</computeroutput> defaults to 1)</para></listitem>
+     <listitem><para>The the actual size calculation is done in the
+       function <computeroutput>countFiles</computeroutput>. Also here, we check if there
+       are files among them which the selected packer cannot pack
+       (e.g. <computeroutput>zoo</computeroutput> cannot handle symbolic links), and to do so, we
+       filter the file list again by file type and skip the files
+       that cannot be handled (a warning is issued).</para>
+      <para>The file size calculations erly on the output of
+       <computeroutput>stat</computeroutput>. In order not to stress
+       the internal bash arithmetics too much, the size is rounded to
+       the kilobyte. Anyway, integrity checks for arithmetic overflow
+       have been added, and detecting such an error does not break
+       the backup process (anymore); it just sets the maximum size
+       requirement for the target directory (which is <computeroutput>MAX_FSFILESIZE</computeroutput>).
+      </para></listitem>
+     <listitem><para>So if the target path length is short enough
+       (see restriction futher up), the calculated size determines if we
+       run in "collect" or "separate" mode.
+       /para></listitem>
+     <listitem><para>Special attention is needed when we backup the
+       root directory. Normally, the name of the individual achives
+       is the same as the directory that has been backed up insied
+       (except for VFAT charater conversions). In the case of the
+       root directory, there is no name, so we call that one
+       "rootdir". This must lead to trouble if there actually happenes to be a
+       directory called "rootdir", but this is an uncommon case that
+       has not been handled yet. </para></listitem>
+     <listitem><para>The next step is to loop over all the output
+       files. This is kind of a trick, as in "collect" mode there
+       is just one output file, named like the directory. Just in the
+       "separate" mode there several files. </para></listitem>
+     <listitem><para>The target file name gets recoded to prevent any
+       characters not compatible with the VFAT filesystem.</para></listitem>
+     <listitem><warning><para>The availble space on the target is checked. The
+	conservative assumption is that when there is less space left on
+	the target than the total size of the (uncompressed)
+	directory, space is too tight, and the backup aborts
+	immediately. There is no way to override thaqt, but it has
+	proven to be a good indicator of a nearly full backup drive,
+	and hence this is a good thing as it explicitely requires measures.</para></warning></listitem>
+     <listitem><para>Next, the target file extension is
+       determined. This follows the usual convention that each
+       processing tool adds its extension to the file (e.g. using a
+       sequence of <computeroutput>cpio</computeroutput> and
+       <computeroutput>bzip2</computeroutput> results in the target
+       file having the extension of <computeroutput>.cpio.bz2</computeroutput>).</para></listitem>
+     <listitem><para>There is another restriction that can lead to
+       abort of the ISIBackup script: Normally, file operations are
+       not executed on the source drive nor on the target drive, but
+       on a temporary directory that defaults to
+       <computeroutput>/var/tmp</computeroutput>. As this temporary
+       directory may need to hold the "collected" file
+       (e.g. collected by <computeroutput>cpio</computeroutput>) as
+       well as the compressed file
+       (e.g. <computeroutput>bzip2</computeroutput>), and as
+       compression may not reduce the size, the temporary directory
+       must have 220% of the total size of the directory contents
+       available (100% of the added source file sizes for collection, up to 100% for
+       the compressed file and a 20% reserve). In case that fails, it
+       checks whether that much space is available in the target
+       directory, in which case file operations are done there. If
+       neither has that much space, ISiBackup aborts. While doing
+       file operations on the target drive works, it may be very low
+       in performance (e.g. on a network-mounted target directory, or
+       on a removable media target directory).</para></listitem>
+     <listitem><para>Next, the name of then encrypted target file is
+       determined. If encryption is enabled and set to gpg, for
+       example, then the extension
+       <computeroutput>.gpg</computeroutput> will be added to the
+       resulting file name.</para></listitem>
+     <listitem><para>As creating a collected, compressed, and
+       encrypted file can take up some time, that time can be saved
+       in case there already is a target file with the same
+       content. This is called "in-place refresh of a previously
+       created backup". But how can one determine if the contents of
+       an encrypted file are the same as the ones in the source
+       directory? One can't, so we need another trick here. When
+       backing up files, ISIBackup sets the file date to the date of
+       the newsest file included in the backup (e.g. using the
+       <computeroutput>zip -o</computeroutput> option). If all of the
+       file in the source are older than the date of the pre-existing
+       file, backing it up the directory can be skipped as the target
+       still holds a complete backup file. If there is a newer file,
+       and if the file was not encrypted, then some of the
+       compression programs offer an update open (such as
+       <computeroutput>zip -u</computeroutput>) which can be used to
+       further decrease the time needed for backup. As a result, we
+       have a "skip", an "update" and a "create" mode for the abckup file.</para></listitem>
+    </itemizedlist>
+   </sect3>
+   <sect3 id="compression">
+    <title>Compression</title>
+    <itemizedlist>
+     <listitem><para>The next step is to catually produce the
+       collected file (function
+       <computeroutput>createPackedArchive</computeroutput>). It has
+       to be noted that some programs are just "collectors", susch as
+       <computeroutput>tar</computeroutput> and
+       <computeroutput>cpio</computeroutput>, while others are just
+       packers, like <computeroutput>zip</computeroutput> and
+       <computeroutput>bzip2</computeroutput>, while even others have
+       both functions integrated in a way that one can hardly separate
+       them, such as <computeroutput>zip</computeroutput>. Here,
+       collection and compression are done in two integrated steps,
+       resulting in a collected, compressed archive. Additionally,
+       the size of the input directory is recorded for statistics. </para></listitem>
+    </itemizedlist>
+   </sect3>
+   <sect3 id="encryption">
+    <title>Encryption</title>
+    <itemizedlist>
+     <listitem><para>The collected, compressed file is then encyrpted
+       (function
+       <computeroutput>createCryptedFile</computeroutput>).
+       Encryption is done to the configured backup key. Independently
+       of the fact if encryption is enabled or disabled, the size of
+       the resulting output file is recorded for statistics.
+      </para>
+     </listitem>
+     <listitem><para>If file operations were not on the target
+       directory, the file is transferred there from the temporary
+       working directory. </para></listitem>
+     <listitem><para>This concludes the actual backup process, which
+       is repeated for each output file, and for each input directory. The
+       rest ist outputting the statistical information, writing the
+       termination messages to log and stdout, and cleaning up the
+       various temporary files that were used. Also, a time stamp is
+       used to record the date of the backup formally; this is later
+       needed for differential backups.</para></listitem>
+    </itemizedlist>
+   </sect3>
+  </sect2>
+ </sect1>
+
+ <sect1 id="configurationparameters">
+  <title>Configuration Parameters and Command Line Options</title>
+  <para>ISiBackup is a bash script and therefore can be easily
+   parametrized using normal bash syntax. The configuration files (the
+   main one is called <computeroutput>isibackup.conf</computeroutput>
+   and the individual ones per set are called
+   <computeroutput>set.conf</computeroutput>) are "sourced" so the
+   may actually contain program logic instead of just configuration
+   parameters, although I disencourage that ;-)
+  </para>
+  <para>The next table lists the configuration parameters in
+   alphabetical order and gives the point of their first definition as
+   "given" (when part of the program code), as "main" (when part of
+   the configuration file
+   <computeroutput>isibackup.conf</computeroutput>) or as "set" when
+   part of the set
+   definition <computeroutput>set.conf</computeroutput>. As the order
+   of inclusion is "given - default - set",
+   any "given" parameters can be overridden in isibackup.conf, and any
+   "given" and "default" parameters can be overridden in the "set"
+   configuration.
+   <table colsep=1 frame=all pgwide=1 rowsep=1 tocentry=1>
+    <title>ISiBackup Configuration Parameters</title>
+    <tgroup cols=3 align=left>
+     <colspec colname=type colwidth=10pc>
+      <colspec colname=name colwidth=30pc>
+       <colspec colname=description colwidth=60pc>
+	<thead>
+	 <row>
+	  <entry>Name</entry>
+	  <entry>Command line option</entry>
+	  <entry>Default value or value range</entry>
+	  <entry>Example value</entry>
+	  <entry>First definition (given, default, set, command line)</entry>
+	  <entry>Description</entry>
+	 </row>
+	</thead>
+	<tbody valign=top>
+	 <row>
+	  <entry><computeroutput>AUTHORS</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>Written by Marcus Holthaus and Simon Huerlimann.</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>A String describing the authors of this program</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>AUTO_FULL</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>true</computeroutput></entry>
+	  <entry><computeroutput>true | false</computeroutput></entry>
+	  <entry>main, set</entry>
+	  <entry>Consider you are creating a differential backup. A
+	   differential backup is only useful if you have the full
+	   backup that contains the files that were modified before
+	   the start date of the differential backup. So if there is
+	   no full backup of the same set available, should isibackup
+	   create that instead of the differential backup?</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>BACKUP_ROOT</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>/var/backups/isibackup</computeroutput></entry>
+	  <entry><computeroutput>/mnt/isibackup</computeroutput></entry>
+	  <entry>given, main, set</entry>
+	  <entry>Backup target root directory, to be used as part of
+	   target names..</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>CMD_CUT</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>cut</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>Command to cut fragments out of strings.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>CMD_CRYPT</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>gpg</computeroutput></entry>
+	  <entry><computeroutput>pgp</computeroutput></entry>
+	  <entry>main, set</entry>
+	  <entry>What method should be used for encrypting the
+	   generated backup files? If this option is an empty string,
+	   the backup will not be encrypted. If it is
+	   <computeroutput>gpg</computeroutput> or
+	   <computeroutput>pgp</computeroutput>, the respective
+	   program will be used (while pgp is not implemented yet),
+	   and the encryption key (or recipient key) will be the one
+	   set with <computeroutput>CRYPT_KEY</computeroutput></entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>CMD_DATE</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>date -I</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>Command used to create an ISO compatible date string.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>CMD_DATE_FULL</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>date "+%Y-%m-%d-%H-%M-%S"</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>Command used to create a full date including hour,
+	   minute, second</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>CMD_FTP</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>lftp</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>Command used for FTP up- and download (actually, this
+	  must remain lftp unless there is another command that
+	   understands lftp command line syntax)</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>CMD_HOSTNAME</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>hostname -f</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>command to determine the fully qualified hostname</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>CMD_LOCKFILE</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>lockfile</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>command to create a lock file</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>CMD_PACK</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>cpio | cpio.bz2 | cpio.gz | cpio.zip
+	    | tar | tar.bz2 | tar.gz | tar.zip | rar | zoo | zip</computeroutput></entry>
+	  <entry>main, set</entry>
+	  <entry>What method sould be used to collect and to compress
+	   the backup files? You may wither select a collector (cpio,
+	   tar) with an optional compressor (bzip2, gz, zip) , or a combined method
+	   (rar, zoo, zip). Please note that while rar and zoo do
+	   collect and compress as well as zip, ony zip has been
+	   implemented as independent compress-only method.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>CMD_PRUNE</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>isiprune</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry>given</entry>
+	  <entry><computeroutput>isiprune</computeroutput> is a tool from the isitools package that is
+	   used to delete empty subdirectories from a backup directory.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>CMD_RSYNC</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>rsync</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>Command used for rsync (actually, this must remain
+	   rsync unless there is another command that understands the
+	   rsync command line syntax)</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>CMD_TEMPFILE</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>$(tempfile -s "$PROGRAM_IDENT")</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>Program used for generating temporary file
+	   names.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>CMD_TR</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>tr</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>Command to transcode strings</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>COPYRIGHT</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>Copyright (C) 1999-2004 IMSEC GmbH</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>Copyright string</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>CRYPT_KEY</computeroutput></entry>
+	  <entry><computeroutput>-k|--key {key}</computeroutput></entry>
+	  <entry><computeroutput>$(NET) Backup $(date +%Y)</computeroutput></entry>
+	  <entry><computeroutput>Domain Backup 2004</computeroutput></entry>
+	  <entry>main, set, command line</entry>
+	  <entry>The identification string of the key that shoudl be
+	   used as the recipient key for the backup target
+	   files. Of course, CMD_CRYPT must be set to enable
+	   encryption. Furthermore, the preferred encyption method
+	   must be available (commands pgp or gpg), and the public key
+	   must be part of the locally installed keyring of the user
+	   that is currently running ISiBackup. Please note that while
+	   you definitively need the private part of the key for
+	   decrypting and restoring the backup, you do not need the
+	   private key while backing up - it need not be on the system
+    	   being backed up.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>DEF_BLOCKSIZE</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>4</computeroutput></entry>
+	  <entry><computeroutput>8</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>Default size of one directory in blocks. Directories
+	   occupy space on the target drive as well and this factor
+	   assumes that one directory uses an average of 4 blocks.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>DEF_PACKEDBLOCKSIZE</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>1</computeroutput></entry>
+	  <entry><computeroutput>2</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>Default size of a packed directory name. Normally a
+	   packed directory name with all the other information
+	   occupies much less than a kByte, but 1 is the minimum of
+	   this value and therefore includes some reserve.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>DELAY</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>0</computeroutput></entry>
+	  <entry><computeroutput>3s</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>Delay for debugging purposes. At several locations in
+	  the program, statements like <computeroutput>sleep
+	    $DELAY</computeroutput> have been inserted. When starting
+	   isibackup with <computeroutput>set -vx</computeroutput>,
+	   this allows for debugging of dealyed functions.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>DIR_PERMS</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>2770</computeroutput></entry>
+	  <entry><computeroutput>755</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>The permissions of the directories inside the
+	   backup. Normally, the "s" flag is set (hence the 2 at the
+	   beginning) so that newly created subdirectories inherit the
+	   target's permissions and ownerships.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>DIR_PERMS_SET</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>true</computeroutput></entry>
+	  <entry><computeroutput>true</computeroutput> or <computeroutput>false</computeroutput></entry>
+	  <entry>main, set</entry>
+	  <entry>Is ISiBackup allowed to set the permissions of target
+	  directories? This should be set to
+	   <computeroutput>false</computeroutput> whenever the target
+	   directory does not support permissions (i.E. VFAT or smbfs)
+	   or when the upload is being done as a user that must not
+	   set permissions. Otherwise, it should be left as <computeroutput>true</computeroutput></entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>DIRLIST_ENTRY</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>###isibackup-dirlist###</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>"Escape" string used as one of the input file names,
+	   in order to create an otherwise empty output archive with
+	   all of the directories attributes and ownerships.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>FILE_PERMS</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>660</computeroutput></entry>
+	  <entry><computeroutput>644</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>The permissions of the files inside the backup.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>FILE_PERMS_SET</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>true</computeroutput></entry>
+	  <entry><computeroutput>true</computeroutput> or <computeroutput>false</computeroutput></entry>
+	  <entry>main, set</entry>
+	  <entry>Is ISiBackup allowed to set the permissions of target
+	  files? This should be set to
+	   <computeroutput>false</computeroutput> whenever the target
+	   directory does not support permissions (i.E. VFAT or smbfs)
+	   or when the upload is being done as a user that must not
+	   set permissions. Otherwise, it should be left as <computeroutput>true</computeroutput></entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>FILE_RSYNC_LOG</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>/var/tmp/isibackup.1234</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>Internal name of the temporary rsync log. The rsync
+	   log is not just being added to the ISiBackup log, but it is
+	  stored in here first, and only after the termination of the
+	   rsync process, it is appended to the isibackup log. Don't
+	   change this.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>HOST</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>$(hostname)</computeroutput></entry>
+	  <entry><computeroutput>elephant</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>The host name of the host that this ISiBackup is
+	   running on. This can be used as part of the name of the
+	   backup directory location. Hence, backup directories can be
+	   named depening on the name of the host.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>IDENT_GROUP_BACKUP</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>backup</computeroutput></entry>
+	  <entry><computeroutput>wheel</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>The later group owner of the backuped files in the
+	   target directory. This can easily be overridden in the main
+	   configuration file or even on a set.conf basis. However, the
+	   backup group is an appropriate group owner of this file
+	   (pending: check the debian policy for this)</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>IDENT_GROUP_SET</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>true</computeroutput></entry>
+	  <entry><computeroutput>true</computeroutput> or <computeroutput>false</computeroutput></entry>
+	  <entry>main, set</entry>
+	  <entry>Is ISiBackup allowed to change the group owner of target
+	  files? This should be set to
+	   <computeroutput>false</computeroutput> whenever the target
+	   directory does not support group ownerhips (i.E. VFAT or smbfs)
+	   or when the upload is being done as a user that must not or
+	   cannot change group ownership. Otherwise, it should be left as <computeroutput>true</computeroutput></entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>IDENT_USER_SET</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>true</computeroutput></entry>
+	  <entry><computeroutput>true</computeroutput> or <computeroutput>false</computeroutput></entry>
+	  <entry>main, set</entry>
+	  <entry>Is ISiBackup allowed to change the owner of target
+	  files? This should be set to
+	   <computeroutput>false</computeroutput> whenever the target
+	   directory does not support ownerhips (i.E. VFAT or smbfs)
+	   or when the upload is being done as a user that must not or
+	   cannot change ownership. Otherwise, it should be left as <computeroutput>true</computeroutput></entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>ISIBACKUP_CONF</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>/etc/isibackup.conf</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>Name of the main configuration file.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>ISIBACKUP_SET_CONF</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>set.conf</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>Name of the set configuration file</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>LIABILITY</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>This program comes with NO WARRANTY, to the extent permitted by law.</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>Liability restrictions</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>LOCKDIR</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>/var/lock</computeroutput></entry>
+	  <entry><computeroutput>/tmp</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>The directory where lock files should be
+	   placed. Normally, lock files will be placed inside
+	   <computeroutput>/var/lock</computeroutput>, but as ISiBackup need not be executed as root,
+	   and as non-root users normally cannot write into <computeroutput>/var/lock</computeroutput>,
+	   it is failsafe to put it in
+	    <computeroutput>/tmp</computeroutput> (well, almost). Of
+	    course, this does not catch the case where a root and a
+	    non-root user execute the same backup set simultaneously -
+	    this might lead to trouble. (pending).</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>LOCKFILE</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>host.domain.com.isibackup.all.lock</computeroutput></entry>
+	  <entry><computeroutput>something.lock</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>The name of the lock file. It should be
+	   distiguishable from other lock files and its name may well
+	   be speaking.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>LOCKTIME</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>864000</computeroutput></entry>
+	  <entry><computeroutput>172800</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>Maximum time the backup of a particular set runs
+	   exclusively. After that, the lock times out and another
+	   backup of the same set is allowed (which is not healthy at
+	   all). Upon normal termination, ISiBackup removes the lock
+	   file, so that after the end of an ISiBackup run another
+	   ISiBackup may start running immediately.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>LOG_DIR</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>/var/log/isibackup</computeroutput></entry>
+	  <entry><computeroutput>/mnt/isibackup</computeroutput></entry>
+	  <entry>given, main, set</entry>
+	  <entry>Name of the directory where log files should be stored.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>LOG_ERROR_FILE</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>${LOG_DIR}/isibackup-${OPT_SET}-${STARTDATETIME}.error.log</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry>main</entry>
+	  <entry>Name of the log file where all error log messages
+	   go. ISiBackup is not integrated with syslog, but uses its own logging concept by createing one
+	   log file per backup run (and an additional main log file
+	   per backup run).</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>LOG_FILE</computeroutput></entry>
+	  <entry><computeroutput>-l {File} | --log {File}</computeroutput></entry>
+	  <entry><computeroutput>${LOG_DIR}/isibackup-${OPT_SET}-${STARTDATETIME}.log</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry>main</entry>
+	  <entry>Name of the log file where all log messages
+	   go. ISiBackup is not integrated with syslog, but uses its own logging concept by createing one
+	   log file per backup run (and an additional error log file
+	   per backup run).</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>LOG_LEVEL</computeroutput></entry>
+	  <entry><computeroutput>-q | --quiet</computeroutput></entry>
+	  <entry><computeroutput>$LOG_ERROR | $LOG_INFO</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry>main, command line</entry>
+	  <entry>Default log level. The higher it is is set, the less
+	   messages go to the log. See the libisi documentation for
+	   more information.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>MAX_FSFILESIZE</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>2048000</computeroutput></entry>
+	  <entry><computeroutput>19999999</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>Maximum size of one single file on the target file
+	   system.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>MAX_PATHLEN</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>220</computeroutput></entry>
+	  <entry><computeroutput>512</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>Maximum number of characters in path names on the
+	   target file system.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>NET</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>$(hostname -d)</computeroutput></entry>
+	  <entry><computeroutput>external.dersbach.ch</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>The domain name of the host that this ISiBackup is
+	   running on. This can be used as part of the name of the backup directory
+	   location. Hence, backup directories can be named depending
+	   on the name of the network.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>NET_SHORT</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>$(hostname -d | cut -f 1 -d '.')</computeroutput></entry>
+	  <entry><computeroutput>external</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>The short domain name of the host that this ISiBackup is
+	   running on. This can be used as part of the name of the backup directory
+	   location. Hence, backup directories can be named depending
+	   on the name of the network.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>OPT_ARCHIVE</computeroutput></entry>
+	  <entry><computeroutput>-a|--archive {directory}</computeroutput></entry>
+	  <entry><computeroutput>/var/backups/isibackup</computeroutput></entry>
+	  <entry><computeroutput>/mnt/backups</computeroutput></entry>
+	  <entry>main, set, command line</entry>
+	  <entry>The name of the directory where fetched (polled)
+	   backups will be stored locally.</entry>
+	 </row>
+ 	 <row>
+	  <entry><computeroutput>OPT_COLLECT_DELETE_AFTER</computeroutput></entry>
+	  <entry><computeroutput>--collect-delete-after</computeroutput></entry>
+	  <entry><computeroutput>false</computeroutput></entry>
+	  <entry><computeroutput>true</computeroutput> or <computeroutput>false</computeroutput></entry>
+	  <entry>main, set, command line</entry>
+	  <entry>When a backup has been polled from another host, using
+	   the <computeroutput>--collect</computeroutput> command, will
+	    the remotely created backup still be needed? If no, set
+	    this to <computeroutput>true</computeroutput>, and
+	    ISiBackup will delete the remote copy. Otherwise, leave it
+	    as <computeroutput>false</computeroutput>. This keeps the
+	    backup space occupied on the remote file system, but it
+	    allows for an in-place refresh of backups and therefore
+	    increases speed considerably when re-creating a full backup.</entry>
+	 </row>
+ 	 <row>
+	  <entry><computeroutput>OPT_COPY_DELETE_AFTER</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>false</computeroutput></entry>
+	  <entry><computeroutput>true</computeroutput> or <computeroutput>false</computeroutput></entry>
+	  <entry>main, set</entry>
+	  <entry>When a backup has been pushed to another host, using
+	   the <computeroutput>--copy</computeroutput> command, will
+	    the locally created backup still be needed? If no, set
+	    this to <computeroutput>true</computeroutput>, and
+	    ISiBackup will delete the local copy. Otherwise, leave it
+	    as <computeroutput>false</computeroutput>. This keeps the
+	    backup space occupied on the local file system, but it
+	    allows for an in-place refresh of backups and therefore
+	    increases speed considerably when re-creating a full backup.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>OPT_FILESYSTEMS</computeroutput></entry>
+	  <entry><computeroutput>-f|--other-filesystems</computeroutput></entry>
+	  <entry><computeroutput>false</computeroutput></entry>
+	  <entry><computeroutput>true | false</computeroutput></entry>
+	  <entry>main, set, command line</entry>
+	  <entry>If set to true, ISiBackup includes files it find on
+	   other filesystems if the match the list of inclusion
+	   patterns. If set to false, it skips them by using the
+	   <computeroutput>find -xdev</computeroutput> option.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>OPT_INCLUDE_MODE</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>mount | fstab | {anything else}</computeroutput></entry>
+	  <entry>main, set</entry>
+	  <entry>If set to <computeroutput>mount</computeroutput>,
+	   ISiBackup does not backup the files that match the list of
+	   inclusion patterns, but tries to backup everything on every
+	  filesystem that has been mounted. If set to
+	   <computeroutput>fstab</computeroutput>, it goes even
+	   further and includes even previously known, but unmounted
+	   filesystems by trying to mount them. Any other value in
+	   this option will render the normal behaviour with the list
+	   of inclusion patterns.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>OPT_MODE</computeroutput></entry>
+	  <entry><computeroutput>-D|--diff | -F|--full</computeroutput></entry>
+	  <entry><computeroutput>full</computeroutput></entry>
+	  <entry><computeroutput>diff</computeroutput></entry>
+	  <entry>command line</entry>
+	  <entry>ISiBackup mode of operation. Here you give
+	   <computeroutput>full</computeroutput> for a full backup and
+	  <computeroutput>diff</computeroutput> for a differential one.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>OPT_REMOTE_HOST</computeroutput></entry>
+	  <entry><computeroutput>-H|--remote-host {Host}</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>remotehost.domain.com</computeroutput></entry>
+	  <entry>main, set, command line</entry>
+	  <entry>The name of the remote host where the backup should
+	   be fetched from (poll) or stored to (push).</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>OPT_REMOTE_METHOD</computeroutput></entry>
+	  <entry><computeroutput>-r|--remote-method ftp|rsync</computeroutput></entry>
+	  <entry><computeroutput>rsync</computeroutput></entry>
+	  <entry><computeroutput>ftp</computeroutput></entry>
+	  <entry>given, main, set, command line</entry>
+	  <entry>The method that should be used to fetch (poll) or to
+	   store (push) remote backup directories.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>OPT_REMOTE_PASSWORD</computeroutput></entry>
+	  <entry><computeroutput>-p|--remote-password |
+	    -A|--remote-password-file {file}</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>blabla</computeroutput></entry>
+	  <entry>main, set, command line</entry>
+	  <entry>The password to use when logging into the remote
+	   host, and when using passwords is appropriate (currently
+	   only for pushing onto an ftp server). The remote password
+	   can be read in from a file (use -A {file} instead of -p {password})</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>OPT_REMOTE_PATH</computeroutput></entry>
+	  <entry><computeroutput>-P|--remote-path {directory}</computeroutput></entry>
+	  <entry><computeroutput>/var/backups/isibackup</computeroutput></entry>
+	  <entry><computeroutput>/mnt/backups</computeroutput></entry>
+	  <entry>main, set, command line</entry>
+	  <entry>The name of the directory where copies (pushed)
+	   backups will be stored remotely.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>OPT_REMOTE_USER</computeroutput></entry>
+	  <entry><computeroutput>-u|--remote-user</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>admin</computeroutput></entry>
+	  <entry>main, set, command line</entry>
+	  <entry>The user name to login into the remote host given in
+	  <computeroutput>OPT_REMOTE_HOST</computeroutput>. This is
+	   used for fetching (poll) and storing (push) of backups.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>OPT_RSYNC_ADD_OPTIONS</computeroutput></entry>
+	  <entry><computeroutput>--rsync-add-options</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry>given, main, set, command line</entry>
+	  <entry>Additional options that should be included in the
+	   rsync command line. May be left empty.
+	  </entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>OPT_RSYNC_OPTIONS</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>--recursive --times --links --devices --verbose --verbose --checksum --stats --progress --partial</computeroutput></entry>
+	  <entry><computeroutput>-a</computeroutput></entry>
+	  <entry>given, main, set</entry>
+	  <entry>The options that the rsync method should be called
+	   with. Preset to all options necessary for conserving
+	   permisstions, ownerships and other "true to the original"
+	   properties.
+	  </entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>OPT_SET</computeroutput></entry>
+	  <entry><computeroutput>-s|--set {Set}</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>data_linux</computeroutput></entry>
+	  <entry>command line</entry>
+	  <entry>The name of the currently executed backup set, as set
+	  with <computeroutput>--set {Set}</computeroutput></entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>OPT_SINCE</computeroutput></entry>
+	  <entry><computeroutput>-i|--since</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>2003-12-01</computeroutput></entry>
+	  <entry>command line</entry>
+	  <entry>In case of a differential backup, this is the date to
+	   start against (i.e. the backup includes only files created
+	   or modified since this date). If left empty, ISiBackup will
+	   use the appropriate state file to determine the run of the
+	   last full backup. </entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>ISIBACKUP_CONF_PATH</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>/etc/isibackup</computeroutput></entry>
+	  <entry><computeroutput>/mnt/backups/conf</computeroutput></entry>
+	  <entry>The path where ISiBackup gets its main configuration
+	   files and the individual set definitions as well as other
+	   files it needs.</entry>
+	  <entry></entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>PATH_DIFF</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>/var/backups/isibackup/diff</computeroutput></entry>
+	  <entry><computeroutput>/mnt/backups/diff</computeroutput></entry>
+	  <entry>The path where ISiBackup puts the results of the
+	   differential backup run. This should include a date identification.</entry>
+	  <entry></entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>PATH_FULL</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>/var/backups/isibackup/full</computeroutput></entry>
+	  <entry><computeroutput>/mnt/backups/full</computeroutput></entry>
+	  <entry>main</entry>
+	  <entry>The path where ISiBackup puts the result of the full
+	   backup runs.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>PATH_LIB</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>/usr/lib/libisi</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>Path to the library function ISiBackup uses (see in
+	   section "Configuration files and package dependencies").</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>PATH_STATE</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>/var/backups/isibackup/state</computeroutput></entry>
+	  <entry><computeroutput>/mnt/backups/state</computeroutput></entry>
+	  <entry>main</entry>
+	  <entry>The path where ISiBackup puts the general state
+	   information of all backups it has generated. The state
+	   files ar shore files mainly containing a backup date, that
+	   is later used to determine the date to diff a differential
+	   backup to.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>PROGRAM_IDENT</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>isibackup</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>The name if the ISiBackup program</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>PROGRAM_VERSION</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>1.4.1</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>The current program version</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>STARTDATETIME</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>2004-09-17-12-36</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>The exact start time (to the minute) of the ISiBackup
+	  run. Used as part of the log file names.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>TODAY</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>$(date -I)</computeroutput></entry>
+	  <entry><computeroutput>2004-02-17</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>The date of the backup run, may be used as part of
+	   the backup directory name.</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput>TMPDIR</computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput>$(dirname $(CMD_TEMPFILE))</computeroutput></entry>
+	  <entry><computeroutput>/var/tmp</computeroutput></entry>
+	  <entry>given</entry>
+	  <entry>Name of the temporary directory. ISiBackup determines
+	  this by executing the tempfile command and then extracting
+	   the directory name of the new temporary file (without
+	   creating a file).</entry>
+	 </row>
+	 <row>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry><computeroutput></computeroutput></entry>
+	  <entry></entry>
+	  <entry></entry>
+	 </row>
+	</tbody>
+    </tgroup>
+   </table>
+
+ </sect1>
+
+ <sect1 id="remarks">
+  <title>Remarks</title>
+  <para>The source as well as the target directory may lie on any file system,
+   i.e. mounted ones using nfs or cifs. Be aware that the restrictions
+   of the respective filesystems apply. For example, it may still be
+   unstable to create files larger than 2 GB on samba/cifs mounted
+   partitions, or on FAT partitions. Also, changing owner and group or
+   their permissions does not work on these filesystems.
+  </para>
+  <para>
+   When studying the crontab you will notice that some (or most) of
+   the ISiBackup jobs are run as root. This is "easy", as it makes sure
+   ISiBackup can read all it needs. It may have some security
+   consequences I am not fully aware of, and I have already thought of
+   running it as nobody:wheel. At least, the backup directories
+   themselves are owned by admin:backup (on my systems at least, bound
+   to change to conform to debian policies). I could eevn imagine
+   having the data backups run as nobody:staff, but that might fail as
+   I have excluded some accounts from staff on some systems, and as
+   backing up configuration parameters as part of the data surely
+   fails then. There's work to do here.
+  </para>
+  <para>
+   I found it quite probelmatic to pass local values back out of a
+   subfunction in bash. Any way I tried, the values just got lost. So
+   in the end, I implemented a method of writing local values out to
+   temporaray files, from where I would read them back from within the
+   "outer" routine. This is not "nice", but it works. Anyone with a
+   better solution is welcome.
+  </para>
+  <para>
+  The progress indicator was meant to be overwritten with each change.
+   Instead it fails to overwrite part of the line, which produces some
+   untidy output. Here as well, I conducted some tests, but better
+   solutions are welcome.
+   </para>
+  <para>
+   Beware not to do "in-place" backups, i.e. having Source and Target
+   directory in the same place. While this might work,
+   ISiBackup was not intended to handle it correctly, and in the case
+   of "separate" operation mode it is doomed to fail, probably
+   resulting in data loss. If space is tight, you better enable the
+   automatic deletion of the original after each directory backup
+   (using the ... the parameter ... what was it again ... eh ... to be written).
+  </para>
+  <para>
+   Symbolic links are not being followed, but stored as link. So if,
+   for example, you include /*/, and /var is a link to /usr/var, then
+   /usr/var will be backuped, /var will be backuped as a symbolic
+   link, and all exclusions to /var subdirectores are ignored as there
+   are none - you would have to reformulate them as exclusions to
+   /usr/var subdirectories. But if, on tthe other hand, you include
+   /var, it does not matter if it is a symbolic link, as it is at the
+   root of the find command, and therefore the find will work on it.
+  </para>
+  <para>
+   ISiBackup has mainly been tested on systems where there is a
+   partition for each of /, /usr, and /var. /home is a link to
+   /var/home and /var/home is a link to /var/local/share/home (don't
+   flame me, it makes sense here). On some systems, there was no
+   partition for /var, but /var was a link to /usr/var. That meant
+   changing all directory exclusions. Of course it does not work to
+   exclude /usr/var as we might have /var, because /var is stored as
+   symbolic link. It's necessary to change all exclusions from
+   /var/... to /usr/var/... on that system.  </para>
+  <para>
+   Usually I use isibackup in poll mode, and go for full encryption
+   with cpio data format for host backups and zip format for the data
+   backup. Using it in poll mode nmeans the backup is generated
+   locally, and it will be fetched later using a remote login
+   mechanism from the backup server to this machine.
+   This way I have an easy option when a disk gets full. The first
+   thing that can be deleted is the locally generated backup (don't frown), as you can
+   just switch over to pull mode, where you generate the backup remotely.
+  </para>
+  <para>
+   In the default setup, isibackup --data also saves most of the
+   configuration files. This is provided as a feature in case you
+   "forgot" to backup the host lately. Be aware that this may help
+   you resetup your system after a crash, but that it is not sufficient.
+  </para>
+  <para>
+   Also be aware that by default isibackup skips all files on other
+   filesystems, if they have not been included
+   in the *include_dir* configuration files! this is to prevent
+   backing up other hosts automatically, but it may
+   also prevent backing up files on other harddisks on this system!
+  </para>
+  <para>
+   Whenever you have a question regarding an option or a problem that
+   has not been described here, please look at the source code. The
+   main ISiBackup script is called
+   <computeroutput>isibackup</computeroutput> and is a shell
+   script. That means that what you run is actually the source, and
+   you may have a look into it by just issuing <computeroutput>less
+    $(which isibackup)</computeroutput>
+  </para>
+  <para>After having used ISiBackup for some time, you might have got
+   used to the relatively fast "in-place refresh" of backups compared
+   to the recreation of backups. Just remember that an in-place
+   refresh never deletes any directory. That is, if you deleted a
+   directory in the drive you back up, that directory will remain to
+   exist inside your backup. In the unfortunate case where you have
+   to restore a backup, that directory will be restored to. Even if
+   you might be happy to get back those contents, the backup is not a
+   true backup of the original, but something more. 
+  </para>
+ </sect1>
+
+
+ <ackno>
+  Acknowledgements and contribution:
+  Writing and testing ISiBackup has taken up a good part of my
+  time in 2000 and 2001, and documenting it was a task I always postponed
+  until now. However, it was worth it, and I am happy to have been
+  able to finish a first version. May my effort enhance your
+  prosperity. That having said, I am fully aware that I am just one
+  of the great many individuals and organisations contributing to
+  open source development, to linux and other great systems. Hereby I
+  thank you all for your effort in creating dependable and freely
+  available information systems. ISiBackup is, up to now, my major
+  manifest contribution to this community. Apart from that I continue
+  to sponsor open-source related systems mentally, by providing
+  connectivity and partly even by spending money on
+  developers (employees, co-workers, partners). Let's go on building
+  the information society.
+ </ackno>
+</article>
+
+<!-- Keep this comment at the end of the file
+Local variables:
+mode: sgml
+sgml-omittag:t
+sgml-shorttag:t
+sgml-namecase-general:t
+sgml-general-insert-case:lower
+sgml-minimize-attributes:nil
+sgml-always-quote-attributes:t
+sgml-indent-step:1
+sgml-indent-data:t
+sgml-parent-document:nil
+sgml-exposed-tags:nil
+sgml-local-catalogs:nil
+sgml-local-ecat-files:nil
+End:
+-->

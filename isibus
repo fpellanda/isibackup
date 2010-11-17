@@ -1,0 +1,139 @@
+#!/bin/bash
+# Copyright (C) 1999-2007  IMSEC GmbH
+# Copyright (C) 2004-2007  Logintas AG
+#
+# This file is part of ISiBackup.
+#
+#    ISiBackup is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    ISiBackup is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License along
+#    with this program; if not, write to the Free Software Foundation, Inc.,
+#    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
+PROGRAM_IDENT="isibus"
+PROGRAM_VERSION="##DEVELOPMENT##"
+COPYRIGHT="\
+Copyright (C) 1999-2007  IMSEC GmbH
+Copyright (C) 2004-2007  Logintas AG"
+LIABILITY="This program comes with NO WARRANTY, to the extent permitted by law."
+AUTHORS="Written by Marcus Holthaus, Simon Huerlimann and Adrian Friedli."
+
+lBackupTargetDir=/var/backups/isibackup
+lTmpFName=${TMPDIR:=/var/tmp}/isibus.$$
+
+
+function do_version () {
+    echo "$PROGRAM_IDENT $PROGRAM_VERSION"
+    echo "$COPYRIGHT"
+    echo "$LIABILITY"
+    echo
+    echo "$AUTHORS"
+
+}
+
+function do_help () {
+    echo "'$PROGRAM_IDENT' shows the size of backups created by isibackup and stored locally at ${lBackupTargetDir}"
+    echo "It creates an unsorted list and a list reversly sorted by size, which are both displayed on stdout."
+    echo
+    echo "Usage: $PROGRAM_IDENT [-v|--verbose] [-d <delay>|--delay <delay>]"
+    echo 
+    echo "OPTIONS:"
+    echo "      -v      --verbose                       give more infos"
+    echo "      -w      --debug                         give even more infos"
+    echo "      -d      --delay <delay>                 loop with delays of <delay>"       
+    echo
+    echo "COMMANDS:"
+    echo "      -h      --help                          show this help"
+    echo "      -V      --version                       show version"
+    echo
+    echo "Report bugs to bugs@isibackup.org"
+}
+
+function do_bus () {
+  echo "sizes of created backup directories (press ^C to break):"
+  while $(true) ; do
+    date
+    echo -n > "$lTmpFName"
+    echo "unsorted:"
+    lSetList="$(for i in $(find /etc/isibackup -maxdepth 1 -type d) ; do echo $(basename $i); done | sort -u | xargs)"
+    for lSet in $lSetList; do
+      for lSetDir in $(find ${lBackupTargetDir}/ -maxdepth 5 -type d -name "$lSet") ; do
+        for lSubDir in $(find ${lSetDir}/ -maxdepth 3 -type d) ; do
+          lLine="$(du -s $lSubDir)"
+          echo "$lLine"
+          echo "$lLine" >> $lTmpFName
+        done
+      done
+    done
+    echo
+    echo "sorted:"
+    cat $lTmpFName | sort -rn 
+    echo
+    df ${lBackupTargetDir}/
+    if [ ! -z "$OPT_DELAY" ] ; then 
+      echo "sleeping $OPT_DELAY"
+      sleep $OPT_DELAY
+    else
+      break
+    fi
+  done
+
+  echo "be aware that these are only the sets $lSetList, and not a complete list of directories below $lBackupTargetDir !"
+}
+
+
+lArgs=$(getopt -o vVhd: -l verbose,delay:,help,version -n "$PROGRAM_IDENT" -- $*)
+eval set -- ${lArgs}
+
+while true ; do
+    case "$1" in
+	-v|--verbose)
+	    LOG_LEVEL=$LOG_VERBOSE
+	    shift ;;
+		
+	-d|--delay)
+	    OPT_DELAY="$2"
+	    shift 2 ;;
+
+	-V|--version)
+	    lIsiBusCmd="VERSION"
+	    shift ;;
+
+	-h|--help)
+	    lIsiBusCmd="HELP"
+	    shift ;;
+	
+	--) shift 
+	    break ;;
+	*) 
+	    echo "[ERROR] the commandline parsing failed!"
+	    echo "'$@'"
+	    exit 1 ;;
+    esac
+done
+
+lIsiBusCmd="${lIsiBusCmd:-SHOW}"
+
+#do_version
+
+case $lIsiBusCmd in 
+    SHOW)
+	do_bus ;;
+
+    VERSION)
+	do_version ;;
+
+    HELP)
+	do_version
+        do_help ;;
+
+esac
+

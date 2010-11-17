@@ -1,0 +1,44 @@
+#!/bin/bash
+# Copyright (C) 1999-2007  IMSEC GmbH
+# Copyright (C) 2004-2007  Logintas AG
+#
+# This file is part of ISiBackup.
+#
+#    ISiBackup is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    ISiBackup is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License along
+#    with this program; if not, write to the Free Software Foundation, Inc.,
+#    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+#
+
+set -e
+
+. /usr/share/debconf/confmodule
+
+PACKAGE="isibackup"
+
+PATH_CONF="/etc/$PACKAGE"
+FILE_CONF="$PATH_CONF/$PACKAGE.conf"
+
+PARAMETERS_CONF="BACKUP_ROOT CMD_CRYPT OPT_PACKMETHOD CRYPT_KEYS"
+
+PARAMETERS_LOW="BACKUP_ROOT CRYPT_KEYS"
+PARAMETERS_MEDIUM="CMD_CRYPT OPT_PACKMETHOD"
+
+. "/usr/lib/libisi/lib_conf.sh"
+
+# 0) preset config parameters with contents of config files
+if [ -r "$FILE_CONF" ] ; then
+    update_debconf_from_config "$(<$FILE_CONF)" "$PARAMETERS_CONF"
+fi
+
+# 1) ask questions to user
+configure_debconf "$PARAMETERS_LOW" "$PARAMETERS_MEDIUM"

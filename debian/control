@@ -1,0 +1,19 @@
+Source: isibackup
+Section: utils
+Priority: optional
+Maintainer: Adrian Friedli <adrian.friedli@logintas.ch>
+Build-Depends: debhelper (>= 5), docbook, docbook-utils, help2man, libisi-ruby
+Standards-Version: 3.7.2
+
+Package: isibackup
+Architecture: all
+Depends: debconf, procmail, stat (>=3.3-2) | coreutils (>= 4.5.1-2), adduser, moreutils, ruby, procps, libisi-ruby
+Suggests: zip, unzip, bzip2, gnupg (>= 1.0.7), pgp, rsync, lftp
+Description: compressing, encrypting backup program for local and remote backup
+ A backup program intended to ease the backup procedures of data and system 
+ files on linux and probably other un*x hosts and mounted filesystems 
+ (like samba / windows). it supports full, incremental and differential 
+ backups and can store the resulting backup files on a remote target using
+ mounted filesystems or rsync. It support compression and encryption of backup
+ data.
+ The dependency on procmail is due to the use of lockfile.

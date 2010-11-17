@@ -1,0 +1,7 @@
+# list of directories to be backed up in separate mode
+#
+# This means, that each file in these directories will 
+# be compressed and crypted separate.
+#
+# data should be in very few places:
+var/log/mysql

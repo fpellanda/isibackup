@@ -1,0 +1,7 @@
+/var/log/isibackup/*.log {
+     rotate 10
+     size 1M
+     weekly
+     compress
+     missingok
+}

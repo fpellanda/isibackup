@@ -1,0 +1,740 @@
+#!/bin/bash
+# Copyright (C) 1999-2007  IMSEC GmbH
+# Copyright (C) 2004-2007  Logintas AG
+#
+# This file is part of ISiBackup.
+#
+#    ISiBackup is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    ISiBackup is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License along
+#    with this program; if not, write to the Free Software Foundation, Inc.,
+#    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
+PROGRAM_IDENT="isirestore"
+
+DELAY=0
+
+DIR_PERMS=0700
+FILE_PERMS=0600
+
+TMPDIR=${TMPDIR:-/var/tmp}/isirestore-$$
+ISIBACKUP_CONFIGDIR=${ISIBACKUP_CONFIGDIR:-/etc/isibackup}
+ISIBACKUP_CONFIG_DEFAULTS=${ISIBACKUP_CONFIG_DEFAULTS:-$ISIBACKUP_CONFIGDIR/defaults.conf}
+
+PROGRAM_VERSION="##DEVELOPMENT##"
+COPYRIGHT="\
+Copyright (C) 1999-2007  IMSEC GmbH
+Copyright (C) 2004-2007  Logintas AG"
+LIABILITY="This program comes with NO WARRANTY, to the extent permitted by law."
+AUTHORS="Written by Marcus Holthaus, Simon Huerlimann and Adrian Friedli."
+
+#set -e
+# set -vx
+DELAY=0
+
+function do_version () {
+    echo "$PROGRAM_IDENT $PROGRAM_VERSION"
+    echo "$COPYRIGHT"
+    echo "$LIABILITY"
+    echo
+    echo "$AUTHORS"
+
+}
+
+function do_help () {
+    echo "$PROGRAM_IDENT restores a backup, previously created by isibackup, to a restore location."
+    echo "Source and target directory must be given. In case the backup was enrypted, the passphrase for decryption must be given and the decryption key must be available."
+    echo "The use of a gpg-agent is recommended for secure password handling."
+    echo
+    echo "Usage: $PROGRAM_IDENT [-v|--verbose] -s|--source-dir <source-dir> "
+    echo "  -t|--target-dir <target-dir> [-p <passphrase>|--passphrase <passphrase>] "
+    echo
+    echo "OPTIONS:"
+    echo "      -v      --verbose                       give more infos"
+    echo "      -w      --debug                         give even more infos"
+    echo "      -f      --force                         do not ask to delete mysqldirectory."
+    echo "      -s      --source-dir                    source directory where the backup is stored"
+    echo "      -t      --target-dir                    target directory where the restoration of the backup should be stored"
+    echo "      -N      --net                           network name to choose backup from"
+    echo "      -H      --host                          hostname to choose backup from"
+    echo "      -S      --set                           name of set to backup"
+    echo "      -p      --passphrase                    passphrase for the key that the backup was encrypted with (implies --no-use-agent)"
+    echo "      -A      --no-use-agent                  turns off the usage of the gpg-agent"
+    echo
+    echo "COMMANDS:"
+    echo "      -h      --help                          show this help"
+    echo "      -V      --version                       show version"
+    echo "      -r      --restore                       restore the backup"
+    echo "      -m      --restore-mysql                 restore the mysql database"
+    echo
+    echo "Report bugs to bugs@isibackup.org"
+}
+
+function decodeVFATChars () {
+lInStr="$1"
+    while [ -n "$(echo $lInStr | grep "%1A")" ] ; do
+        lInStr=$(echo "$lInStr" | sed -e 's/%1A/:/g')
+    done
+    echo "$lInStr"
+}
+
+function escape_field () {
+    # escape backslashes, quotes and newlines, do quotes around fields if necessary
+    sed -e ':a;$bb;N;ba;:b;s/\\/\\\\/g;s/\"/\\\"/g;s/\n/\\n/g;/[,;\\]/s/^.*$/\"&\"/'
+}
+
+function do_stamp () {
+    lStampFile="$PATH_STATE/$OPT_HOST.$OPT_NET.log"
+    for lStampField in "$START_TIME" "$FINISH_TIME" "RESTORE" "$OPT_SET" "" \
+            "" "" "" "" "" \
+            "" "" "$PROGRAM_VERSION" "$OPT_HOST" "$OPT_NET" \
+            "" "" "$OPT_TARGET_DIR" "$lStampType"; do
+        echo -n "$lStampField" | escape_field
+        echo -n ","
+    done | sed -e '$s/,$/\n/' >> "$lStampFile"
+}
+
+function do_exit () {
+    trap EXIT TERM INT
+    if [ -z "$1" ] ; then
+        lStampType=aborted_by_user
+        set 1
+    fi
+    if [ $1 == 1 ] ; then
+        echo "Abroting by error." >&2
+    fi
+    if [ -n "$2" ] ; then
+        echo "$2" >&2
+    fi
+    FINISH_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+    do_stamp
+    echo -n "Removing temporary directories" >&2
+    rm -rf $TMPDIR >&2
+    echo "." >&2
+    exit $1
+}
+
+function getExt () {
+    # determine the extension of a given file name
+    # unfortunately, there does not seem to be a GNU function for that,
+    # especially if there is no information on how many extensions there are
+    lFileName="$1"
+    lPathPart="$(dirname -- "$lFileName")"
+    lExt="$(basename -- "$lFileName")"
+    lPreCount=0
+    while [ ! -z "$lExt" -a "$lExt". != "$lPrevExt". ] ; do
+        lPrevExt="$lExt"
+        lExt="$(echo $lExt | cut -f 2- -d '.')"
+        lPreCount=$(( $lPreCount + 1))
+    done
+    lExt="$lPrevExt"
+    echo "$lExt"
+#    lNewFileName="$(echo "$lFileName" | cut -f $lPreCount -d '.')"
+}
+
+function decode_string () {
+    echo 'print ARGV[0].gsub(/\%([0-9a-f]{2})/) {|match| "" << $1.to_i(16) }' | ruby - "$1"
+}
+
+function restoreCurDir () {
+    # take all files in current directory and restore them to the target direcory
+    # takes one arguments: the current Target Subdirectory, corresponding to the current local directory
+    local lSourceSubDir="$1"
+    local lTargetSubDir=$(decode_string "$1")
+#    echo "Subdir: '$1'"
+
+    # go one down
+    lRecursionLevel=$(( $lRecursionLevel + 1 ))
+
+    # make sure the target subdir exists. actually, it should, as it was in the content of the superordinate backup file, but you never know
+    if [ ! -d "$OPT_TARGET_DIR/$lTargetSubDir" ] ; then
+        mkdir -p "$OPT_TARGET_DIR/$lTargetSubDir"
+    fi
+    # do it in two steps: first the files, then the directories
+    ls -A -1 | while read lBackupFile ; do
+        if [ -z "$lBackupFile" ] ; then continue ; fi
+        if [ "$lBackupFile" == "*" ] ; then continue ; fi
+	if [ -d "$lBackupFile" ] ; then continue ; fi
+
+	lFiles="mysql.dump.bz2.gpg postgres.dump.bz2.gpg dpkg-selections.bz2.gpg"
+
+#	echo "restoring file '$lTargetSubDir/$lBackupFile'"
+	sleep $DELAY
+
+	if [ "$lBackupFile" == "dirlist.bz2" ] ; then
+	    continue 1
+	fi
+	if [ "$lBackupFile" == "filelist.bz2" ] ; then
+	    continue 1
+	fi
+
+	lCurFileUncrypted=$(uncryptCurFile "$lBackupFile" "$TMPDIR")
+
+	if [ -z "$lCurFileUncrypted" ] ; then do_exit 1 "Error uncrypting file" ; fi
+
+
+	for lFile in $lFiles ; do
+	    if [ "$lBackupFile" == "$lFile" ] ; then
+		mv "$TMPDIR/$lCurFileUncrypted" "$OPT_TARGET_DIR/$lTargetSubDir"
+		continue 2
+	    fi
+	done
+	
+	lCurFileUnpacked=$(unpackCurFile "$TMPDIR/$lCurFileUncrypted" "$TMPDIR")
+	if [ -z "$lCurFileUnpacked" ] ; then do_exit 1 "Error unpacking file" ; fi
+	lCurFileUnCollected=$(uncollectCurFile "$TMPDIR/$lCurFileUnpacked" "$OPT_TARGET_DIR/$lTargetSubDir")
+	if [ -z "$lCurFileUnCollected" ] ; then do_exit 1 "Error uncollecting file" ; fi
+	rm -f "$TMPDIR/$lCurFileUncrypted" "$TMPDIR/$lCurFileUnpacked"
+    done
+    if [ $? != 0 ] ; then exit $? ; fi
+
+    ls -A -1 | while read  lBackupDir ; do
+        if [ "$lBackupDir" == "*" ] ; then continue ; fi
+	if [ -d "$lBackupDir" ] && [ $lRecursionLevel -ne 1 -o "$lBackupDir" != "isibackup" ]; then
+	    echo "restoring dir  '$lSourceSubDir/$lBackupDir'"
+	    sleep $DELAY
+	    pushd -- "$lBackupDir" > /dev/null
+	    restoreCurDir "$lSourceSubDir/$lBackupDir"
+	    popd > /dev/null
+        fi
+    done
+    if [ $? != 0 ] ; then exit $? ; fi
+
+    if [ -e "filelist.bz2" ] ; then
+	# remove all files that are not in the file list
+	ruby <<EOF -- - "$TMPDIR/filelist" "$OPT_TARGET_DIR/$lTargetSubDir"
+require "yaml"
+require "pathname"
+target = Pathname.new(ARGV[1])
+open(ARGV[0],"w") {|o|
+    open("|bzcat filelist.bz2").each_line {|l|
+	raise "unexpected line: #{l.inspect}" unless l =~ /^\".*\"$/
+	yaml = YAML.load(eval(l))
+	pathname = yaml.ivars["pathname"]
+	o.write("./" + pathname.basename.to_s + "\n")
+    }
+}
+EOF
+        pushd -- "$OPT_TARGET_DIR/$lTargetSubDir" > /dev/null
+	find -maxdepth 1 ! -type d > "$TMPDIR/filelist.current"
+	for file in $(combine "$TMPDIR/filelist.current" not "$TMPDIR/filelist") ; do
+	    echo "Remove deleted file: $file"
+	    rm $file
+	done
+	popd > /dev/null	
+    fi
+
+    if [ -e "dirlist.bz2" ] ; then
+	# remove all files that are not in the file list
+	
+	ruby <<EOF -- - "$TMPDIR/dirlist" "$OPT_TARGET_DIR/$lTargetSubDir"
+require "yaml"
+require "pathname"
+target = Pathname.new(ARGV[1])
+open(ARGV[0],"w") {|o|
+    open("|bzcat dirlist.bz2").each_line {|l|
+	raise "unexpected line: #{l.inspect}" unless l =~ /^\".*\"$/
+	yaml = YAML.load(eval(l))
+	pathname = yaml.ivars["pathname"]
+	oldstat = yaml.ivars["oldstat"]
+	extracted = (target + pathname)
+	if extracted.exist?
+	    if extracted.mtime != oldstat[:mtime]
+#		print "Correcting mtime its #{extracted.mtime} instead of #{oldstat[:mtime]} for directory: #{extracted.to_s}\n"
+		extracted.utime(oldstat[:atime],oldstat[:mtime])
+	    end
+	else
+ #         print "Extract does not exist: #{extracted.to_s}\n"
+	end
+	o.write("./" + pathname.to_s + "\n")
+    }
+}
+EOF
+	pushd -- "$OPT_TARGET_DIR/$lTargetSubDir" > /dev/null
+	find -type d > "$TMPDIR/dirlist.current"
+	for dir in $(combine "$TMPDIR/dirlist.current" not "$TMPDIR/dirlist") ; do
+	    echo grep "^$dir" "$TMPDIR/dirlist" 
+	    grep "^$dir" "$TMPDIR/dirlist" > /dev/null
+	    if [ $? == 1 ] ; then
+		if [[ "$dir" =~ ^/ ]] ; then 
+		    echo "WOULD REMOVE NOT RELATIVE PATH $dir!!!"
+		    exit 99
+		fi
+		echo "Remove deleted directory: $dir"
+		rm -rf $dir
+	    fi
+	done
+	popd > /dev/null	
+    fi
+
+
+    if [ -e "isibackup.dirlist.cpio.bz2.gpg" ] ; then	
+	# extreact isibackup.dirlist again for dir mtimes
+	lCurFileUncrypted=$(uncryptCurFile "isibackup.dirlist.cpio.bz2.gpg" "$TMPDIR")
+
+	lCurFileUnpacked=$(unpackCurFile "$TMPDIR/$lCurFileUncrypted" "$TMPDIR")
+	if [ -z "$lCurFileUnpacked" ] ; then do_exit 1 "Error unpacking file" ; fi
+	lCurFileUnCollected=$(uncollectCurFile "$TMPDIR/$lCurFileUnpacked" "$OPT_TARGET_DIR/$lTargetSubDir")
+	if [ -z "$lCurFileUnCollected" ] ; then do_exit 1 "Error uncollecting file" ; fi
+	rm -f "$TMPDIR/$lCurFileUncrypted" "$TMPDIR/$lCurFileUnpacked"
+    fi
+
+    # go one up
+    lRecursionLevel=$(( $lRecursionLevel - 1 ))
+}
+
+function uncryptCurFile () {
+    # decrypt one file from parameter 1 to the path in parameter 2
+    lSourcePath="$(dirname -- "$1")"
+    lCurFile="$(basename -- "$1")"
+    lTargetPath="$2"
+    lExt="$(getExt "$lCurFile")"
+    lCurFileUncrypted="$(basename -- "$lCurFile" ".$lExt")"
+    if [ ! -f "$lSourcePath/$lCurFile" ] ; then
+	do_exit 1 "Decryption error file not found: '$lSourcePath/$lCurFile'"
+    fi
+sleep $DELAY
+    case "$lCurFile" in
+        *.gpg)
+            if [ "$USE_AGENT" == "false" ] && [ -z "$OPT_PASSPHRASE" ] ; then
+              do_exit 1 "Backup is encrypted and you haven't given a passphrase."
+            elif [ -n "$OPT_PASSPHRASE" ] ; then
+              gpg --quiet --output "$lTargetPath/$lCurFileUncrypted" --batch --yes --passphrase-fd 0 --decrypt "$lSourcePath/$lCurFile" <<< "$OPT_PASSPHRASE"
+            else
+              gpg --quiet --output "$lTargetPath/$lCurFileUncrypted" --batch --yes --use-agent --decrypt "$lSourcePath/$lCurFile"
+            fi
+            ;;
+#        *.pgp)
+#            pgp --decrypt "$lSourcePath/$lCurFile" --output "$lCurFileUncrypted"
+#            ;;
+        *)
+        if [ $? == 0 ] ; then
+            # perhaps it is not encrypted at all, so trying.
+            lCurFileUncrypted=$(basename -- "$lCurFile")
+            cp "$lSourcePath/$lCurFile" "$lTargetPath/$lCurFileUncrypted"
+         fi
+            ;;
+    esac
+    if [ $? != 0 ] ; then
+        do_exit 1 "decryption error on file $lCurFile"
+     fi
+sleep $DELAY
+
+    echo "$lCurFileUncrypted"
+}
+
+function unpackCurFile () {
+    # unpack one file from parameter 1 to the path in parameter 2
+    lSourcePath="$(dirname -- "$1")"
+    lCurFile="$(basename -- "$1")"
+    lTargetPath="$2"
+    lExt="$(getExt "$lCurFile")"
+    lCurFileUnpacked="$(basename -- "$lCurFile" ".$lExt")"
+    sleep $DELAY
+    case "$lCurFile" in
+        *.bz2)
+            bunzip2 -c "$lSourcePath/$lCurFile" > "$lTargetPath/$lCurFileUnpacked"
+            ;;
+        *.gz)
+            gunzip -c "$lSourcePath/$lCurFile" > "$lTargetPath/$lCurFileUnpacked"
+            ;;
+        *.cpio.zip|*.tar.zip)
+            # TODO: may do some things wrong, if directory name ends in .cpio or .tar
+            funzip "$lSourcePath/$lCurFile" > "$lTargetPath/$lCurFileUnpacked"
+            ;;
+        *)
+            # perhaps it is not compressed at all, so trying.
+            lCurFileUnpacked=$(basename -- "$lCurFile")
+            ;;
+    esac
+    if [ $? != 0 ] ; then
+        do_exit 1 "Unpack Error"
+    fi
+    sleep $DELAY
+
+    echo "$lCurFileUnpacked"
+}
+
+function uncollectCurFile () {
+    # release the collection of one file from parameter 1 to the path in parameter 2
+    lSourcePath="$(dirname -- "$1")"
+    lCurFile="$(basename -- "$1")"
+    lTargetPath="$2"
+    lExt="$(getExt "$lCurFile")"
+    lCurFileUncollected="$(basename -- "$lCurFile" .$lExt)"
+    case "$lCurFile" in
+        *.cpio)
+            pushd "$lTargetPath" > /dev/null
+            sleep $DELAY
+            cpio --extract --preserve-modification-time --no-absolute-filenames --unconditional --make-directories \
+                    < "$lSourcePath/$lCurFile" > /dev/null 2>&1
+            popd > /dev/null
+            ;;
+        *.tar)
+            pushd "$lTargetPath" > /dev/null
+            sleep $DELAY
+            tar x --preserve  \
+                    < "$lSourcePath/$lCurFile" > /dev/null 2>&1
+            popd > /dev/null
+            ;;
+        *.zip)
+            unzip -q -o -K "$lSourcePath/$lCurFile" -d "$lTargetPath"
+            ;;
+	empty)
+	    # do nothing this was an empty directory
+	    ;;
+        *)
+            echo "Archive type '$lExt' not supported" >&2
+            false
+            ;;
+    esac
+    if [ $? != 0 ] ; then 
+	do_exit 1 "Uncollect error of file '$CurFile'" 
+    else
+	echo "OK"
+    fi
+
+    sleep $DELAY
+}
+
+
+function do_restore_mysql () {
+    if [ -z "$OPT_SOURCE_DIR" ] ; then
+	dump_file="/mysql.dump.bz2"
+    else
+	dump_file="$OPT_SOURCE_DIR/mysql.dump.bz2"
+    fi
+    
+    if [ ! -s $dump_file ] ; then
+	    echo "Dumpfile $dump_file does not exist or has zero size."
+	    do_exit 1
+    fi
+
+
+
+    datadir=$(grep datadir /etc/mysql/my.cnf | grep -v "#" | cut -d "=" -f 2 | sed 's/ *//')
+    save_cmd="mkdir -p /var/log/mysql/backup/ && mv /var/log/mysql/mysql-bin.* /var/log/mysql/backup"
+    remove_cmd="/var/lib/dpkg/info/mysql-server-5.0.prerm && /var/lib/dpkg/info/mysql-server-5.0.postrm remove"
+    rm_cmd="rm -rf $datadir/*"
+    install_cmd="/var/lib/dpkg/info/mysql-server-5.0.preinst && /var/lib/dpkg/info/mysql-server-5.0.postinst configure"
+    restore_dump_cmd="cat $dump_file | bunzip2 | mysql -u root"
+    restore_binlog_cmd="for file in \$(cat /var/log/mysql/backup/mysql-bin.index | sed 's/var\/log\/mysql/var\/log\/mysql\/backup/') ; do mysqlbinlog \$file | mysql -u root ; done"
+    restart_cmd="/etc/init.d/mysql restart"
+
+    cat << EOF
+
+    Going to remove all data in '$datadir' on THIS
+    System. This is necessary to recreate the whole
+    mysql database. You will loose all data in this
+    directory!! Be aware that you have to execute
+    this script on the system that you want
+    to restore the database to.
+
+    If you are not sure what this means, SKIP THIS!
+    
+    Please type now yes in capital letters to confirm
+    that I will execute the followin comamnds:
+
+    # $save_cmd
+    # $remove_cmd
+    # $rm_cmd
+    # $install_cmd
+    # $restore_dump_cmd
+    # $restore_binlog_cmd
+    # $restart_cmd
+
+EOF
+
+    if [ ! "$lForce" == "FORCE" ] ; then
+	read -r -p "What is your answer? " answer
+	if [ ! "$answer" == "YES" ] ; then
+	    echo "Aborting."
+	    do_exit 1
+	fi
+    fi
+
+    echo "Saving binlog."
+    eval $save_cmd
+    if [ $? != 0 ] ; then echo "failed."; exit 1; fi
+
+    echo "Remove scripts."
+    eval $remove_cmd
+    if [ $? != 0 ] ; then echo "failed."; exit 1; fi
+
+    echo "Removing '$datadir/*'"
+    eval $rm_cmd
+    if [ $? != 0 ] ; then echo "failed."; exit 1; fi
+    
+    echo "Install scripts."
+    eval $install_cmd
+    if [ $? != 0 ] ; then echo "failed."; exit 1; fi
+
+    echo "Restore mysqldump."
+    eval $restore_dump_cmd
+    if [ $? != 0 ] ; then echo "failed."; exit 1; fi
+
+    echo "Restoe binlogs."
+    eval $restore_binlog_cmd
+    if [ $? != 0 ] ; then echo "failed."; exit 1; fi
+
+    echo "Restart mysql."
+    if eval $restart_cmd ; then
+	do_exit 0
+    else
+	echo "ERROR: Restarting."
+	do_exit 1
+    fi	
+   
+}
+
+function do_restore () {
+  mkdir -m $DIR_PERMS -p $TMPDIR
+  echo "mkdir -m $DIR_PERMS -p $TMPDIR"
+
+  BACKUP_ROOT=$OPT_SOURCE_DIR
+  source "$ISIBACKUP_CONFIG_DEFAULTS"
+  eval PATH_STATE=$DEFAULT_PATH_STATE
+
+  # Check if necessary options are set.
+  if [ -z "$OPT_SOURCE_DIR" -o -z "$OPT_TARGET_DIR" ] ; then
+    echo "abort: you MUST indicate source AND a target directory. call \"$PROGRAM_IDENT --help\" for mor information."
+    do_exit 1
+  fi
+
+  # Check if source dir is a backup dir
+  if [ ! -d "$PATH_STATE" ] ; then
+    echo "abort: '$OPT_SOURCE_DIR' doesn't seem to contain a backup (state directory not found)."
+    do_exit 1
+  fi
+
+  OPT_MODE=full
+  HOST=$OPT_HOST
+  NET=$OPT_NET
+  eval OLDSTAMP_FILE_FULL=$DEFAULT_OLDSTAMP_FILE
+
+  # Check if a full backup for given configuration exists
+  LATEST_FULL_DIR="$OPT_SOURCE_DIR/$OPT_SET/full/$OPT_NET/$OPT_HOST"
+  if [ ! -d "$LATEST_FULL_DIR" ] || [ ! -e "$OLDSTAMP_FILE_FULL" ] ; then
+    echo "abort: no full backup for $OPT_HOST in $OPT_NET with set $OPT_SET found."
+    echo "abort: checked for stamp file $LATEST_FULL_DIR and $OLDSTAMP_FILE_FULL"
+    do_exit 1
+  fi
+
+  # Get all additional Backups
+  if [ "$LATEST_FULL_DIR" ]; then
+      LATEST_FULL=$(head -c19 $LATEST_FULL_DIR/isibackup/finished.datetime)
+      echo "Full datetime: $LATEST_FULL"
+      echo "Full directory: $LATEST_FULL_DIR"
+  fi
+
+  LATEST_DIFF_DIR=$(ls -d "$OPT_SOURCE_DIR/$OPT_SET/diff/$OPT_NET/"*"/$OPT_HOST" 2>/dev/null | sort | tail -n1)
+  if [ "$LATEST_DIFF_DIR" ]; then
+      LATEST_DIFF=$(head -c19 $LATEST_DIFF_DIR/isibackup/finished.datetime)
+      echo "Diff datetime: $LATEST_DIFF"
+      echo "Diff directory: $LATEST_DIFF_DIR"
+      if [ "$LATEST_DIFF" \> "$LATEST_FULL" ]; then
+          echo "OK, diff is newer than full."
+      else
+          LATEST_DIFF_DIR=
+      fi
+  fi
+
+  ALL_INCR_DIRS=$(ls -d "$OPT_SOURCE_DIR/$OPT_SET/incr/$OPT_NET/"*"/$OPT_HOST" 2>/dev/null | sort)
+  for dir in $ALL_INCR_DIRS; do
+      INCR_DATE=$(head -c19 $dir/isibackup/finished.datetime)
+      echo "Checking $INCR_DATE"
+      if [ "$INCR_DATE" \> "$LATEST_FULL" ]; then
+          INCR_DIRS+="$dir
+"
+          echo "Ok, incrdir is newer than full."
+          if [ "$INCR_DATE" \> "$LATEST_INCR" ]; then
+              echo "Setting latestincr"
+              LATEST_INCR="$INCR_DATE"
+          fi
+      fi
+  done
+
+  echo "Incremental directories: $INCR_DIRS"
+  echo "Incr datetime: $LATEST_INCR"
+
+  # Check which backup mode to use
+  if [ "$LATEST_DIFF" -a "$LATEST_INCR" ] ; then
+    echo -n "Full, differential ($LATEST_DIFF) and incremental ($LATEST_INCR) backups found, "
+    if [ "$LATEST_DIFF" \> "$LATEST_INCR" ] ; then
+      RESTORE_MODE=diff
+      echo "using full ($LATEST_FULL) and differential ($LATEST_DIFF) backups."
+    else
+      RESTORE_MODE=incr
+      echo "using full ($LATEST_FULL) and incremental (up to $LATEST_INCR) backups."
+    fi
+  elif [ "$LATEST_DIFF" ] ; then
+    RESTORE_MODE=diff
+    echo "Full ($LATEST_FULL) and differential ($LATEST_DIFF) backups found. Using them."
+  elif [ "$LATEST_INCR" ] ; then
+    RESTORE_MODE=incr
+    echo "Full ($LATEST_FULL) and incremental (up to $LATEST_INCR) backups found. Using them."
+  else
+    RESTORE_MODE=full
+    echo "Only full ($LATEST_FULL) backup found. Using it."
+  fi
+
+  echo "Using restore mode $RESTORE_MODE."
+
+  if [ "$RESTORE_MODE" == "diff" ] ; then
+    DIRS_TO_RESTORE_FROM="$LATEST_FULL_DIR"$'\n'"$LATEST_DIFF_DIR"
+  elif [ "$RESTORE_MODE" == "incr" ] ; then
+    # select all incremental backups newer than the full backup
+    lIsNewer=false
+    OLD_IFS="$IFS"; IFS=$'\n'
+    DIRS_TO_RESTORE_FROM="$LATEST_FULL_DIR"$'\n'$(for I in $INCR_DIRS; do
+        if [ "$lIsNewer" == "true" ] ; then
+            echo "$I"
+        else
+            lIncrDate=$(head -c19 $I/isibackup/finished.datetime)
+            if [ "$lIncrDate" \> "$LATEST_FULL" ] ; then
+                lIsNewer=true
+                echo "$I"
+            fi
+        fi
+    done)
+    IFS="$OLD_IFS"
+  else
+    DIRS_TO_RESTORE_FROM="$LATEST_FULL_DIR"
+  fi
+
+  #look if a gpg-agent is runnig, then also use it
+  test "$USE_AGENT" != "false" && gpg-connect-agent > /dev/null 2>&1 < /dev/null && USE_AGENT="true" || USE_AGENT="false"
+
+  if [ "$USE_AGENT" == "false" ] && [ -z "$OPT_PASSPHRASE" ] ; then
+     echo
+     echo "No running gpg-agent found and no password given on the command line."
+     echo
+     echo "If your backup is encrypted, you must have the key installed, and you will need a passphrase to unlock the key."
+     echo "You may enter that passphrase here. It will be stored in the ENVIRONMENT and supplied to the decryption program on each decryption request."
+     echo "If you do not supply it here, decryption will fail."
+     echo "The use of a gpg-agent is recommended, because it's much more secure."
+     echo "If you do not use gpg or pgp, just press enter."
+     read -s -r -p "Enter passphrase for key: " OPT_PASSPHRASE
+     echo
+     test -z "$OPT_PASSPHRASE" && echo "No passphrase given. This may be okay..."
+  fi
+
+  mkdir -p "$OPT_TARGET_DIR"
+
+  START_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+  FINISH_TIME=
+  lStampType=started
+  do_stamp
+  lStampType=aborted_by_error
+
+  OLD_IFS="$IFS"; IFS=$'\n'
+  for I in $DIRS_TO_RESTORE_FROM; do
+    IFS="$OLD_IFS"
+    lTargetSubDir=
+    lRecursionLevel=0
+    cd "$I"
+    restoreCurDir "."
+    IFS=$'\n'
+  done
+  IFS="$OLD_IFS"
+
+  lStampType=completed
+  do_exit 0
+}
+
+trap do_exit TERM INT
+
+lArgs=$(getopt -o ves:t:N:H:S:p:AhVrmf -l verbose,debug,source-dir:,target-dir:,net:,host:,set:,passphrase:,no-use-agent,help,version,restore,restore-mysql,force -n "$PROGRAM_IDENT" -- $*)
+eval set -- ${lArgs}
+
+while true ; do
+    case "$1" in
+        -v|--verbose)
+            LOG_LEVEL=$LOG_VERBOSE
+            shift ;;
+
+        -s|--source-dir)
+            OPT_SOURCE_DIR=$(readlink -f "$2")
+            shift 2 ;;
+
+        -t|--target-dir)
+            OPT_TARGET_DIR=$(readlink -f "$2")
+            shift 2 ;;
+
+        -N|--net)
+            OPT_NET="$2"
+            shift 2 ;;
+
+        -H|--host)
+            OPT_HOST="$2"
+            shift 2 ;;
+
+        -S|--set)
+            OPT_SET="$2"
+            shift 2 ;;
+
+        -p|--passphrase)
+            OPT_PASSPHRASE="$2"
+            shift 2
+            USE_AGENT="false" ;;
+
+        -A|--no-use-agent)
+            USE_AGENT="false"
+            shift ;;
+
+        -r|--restore)
+            lIsiRestoreCmd="RESTORE"
+            shift ;;
+
+        -f|--force)
+            lForce="FORCE"
+            shift ;;
+
+        -m|--restore-mysql)
+            lIsiRestoreCmd="RESTORE_MYSQL"
+            shift ;;
+
+        -V|--version)
+            lIsiRestoreCmd="VERSION"
+            shift ;;
+
+        -h|--help)
+            lIsiRestoreCmd="HELP"
+            shift ;;
+
+         --) shift
+            break ;;
+        *)
+            echo "[ERROR] the commandline parsing failed!"
+            echo "'$@'"
+            do_exit 1 ;;
+    esac
+done
+
+lIsiRestoreCmd="${lIsiRestoreCmd:-HELP}"
+
+#do_version
+
+case $lIsiRestoreCmd in
+    RESTORE)
+        do_restore ;;
+
+    RESTORE_MYSQL)
+        do_restore_mysql ;;
+
+    VERSION)
+        do_version ;;
+
+    HELP)
+        do_version
+        do_help ;;
+
+esac

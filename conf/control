@@ -1,0 +1,29 @@
+# Format of this file:
+#
+# One line
+#   CONFIGURATION: INTERVAL,INTERVAL,INTERVAL
+#
+# CONFIGURATION: name of the backup set
+#
+# INTERVAL #1: Interval for Full-Mode
+# INTERVAL #2: Interval for Incr-Mode
+# INTERVAL #3: Interval for Diff-Mode
+#
+# INTERVAL:
+#   Is the interval on how often the 
+#   backup should be done.
+#
+#   0: never
+#   2: monthly on the second day
+#   10: monthly on the 10th day
+#   *: daily
+#   */2: every second day
+#   */30: monthly on any day
+#
+# enable set media if you want keys or
+# other removable media to be backed up
+# media:   2, *, 0
+config:	3, *, 0
+data:	4, *, 0
+system:	5, *, 0
+

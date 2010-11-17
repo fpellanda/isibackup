@@ -1,0 +1,111 @@
+diff -rN -u old-isibackup-1.6/isibackup new-isibackup-1.6/isibackup
+--- old-isibackup-1.6/isibackup	2007-07-30 09:10:08.000000000 +0200
++++ new-isibackup-1.6/isibackup	2007-07-30 09:10:08.000000000 +0200
+@@ -1462,8 +1462,6 @@
+ }
+ 
+ function do_pack_compress_encrypt () {
+-    lOutputFile=${lFileCrypted:-$lFilePacked}
+-
+     if [ "$lPackMode" == "collect" ] ; then
+         if [ "$lDir" == "$DIRLIST_ENTRY" ] ; then
+             pushd . > /dev/null
+@@ -1481,6 +1479,11 @@
+     popd > /dev/null
+ }
+ 
++function do_hash_filename () {
++    vFileName=$1
++    lFileRaw="$lTargetDir/$(echo -n "$vFileName" | md5sum | sed -e 's|^\(..\)\(..\)\(.\{28\}\).*$|\1/\2/\1\2\3|')"
++}
++
+ function do_backup () {
+     lSourceDir=${lSourceDir:-"/"}
+ 
+@@ -1593,8 +1596,6 @@
+         if [ $lPathNameLen -gt $MAX_PATHLEN ] ; then
+           echo
+           log_skipped "$lTargetFullDir too long"
+-        else
+-          makedir_perms "$lTargetFullDir" || log "Cannot create target sub path '$lTargetFullDir'!" $LOG_FATAL
+         fi
+       fi
+ 
+@@ -1676,7 +1677,6 @@
+                     # create packed target file name
+                     if [ "$lPackMode" == "separate" ] ; then
+                         lName="$(recodeVFATChars "$(basename "$lFile")")"
+-#                        lFileList=$lFile
+                     fi
+ 
+                     # determine if there is enough space on target
+@@ -1686,7 +1686,18 @@
+                             log "Space on target directory '$lTargetFullDir' ($lSpaceOnTargetDir) is less than summed size of directory contents to be backuped from source directory '$lDir' ($lDirSize)." $LOG_FATAL
+                     fi
+ 
+-                    lFilePacked="$lTargetFullDir/$lName$EXT_PACK"
++                    lFileRaw="$lTargetFullDir/$lName"
++
++                    if [ "$lDir" != "$DIRLIST_ENTRY" ]; then
++                        if [ "$lPackMode" == "separate" ] ; then
++                            do_hash_filename "$lFile"
++                        else
++                            do_hash_filename "$lDir"
++                        fi
++                    fi
++
++                    makedir_perms "$(dirname "$lFileRaw")" || log "Cannot create target sub path '$lTargetFullDir'!" $LOG_FATAL
++                    lFilePacked="$lFileRaw$EXT_PACK"
+ 
+                     # determine crypt file name
+                     case "$CMD_CRYPT" in
+@@ -1706,8 +1717,8 @@
+                       # check if the process is necessary, that is, if there are newer files than the backup file among the selected files
+                       # this should only be the case if the same backup has run on the same day!
+                       # of course, this assumes that any new file is also newer than the backup and that it does not have an earlier date
+-                      if [ -z "$lFileCrypted" ] ; then lFileCompare="$lFilePacked" ; else lFileCompare="$lFileCrypted" ; fi
+-                      if [ -e "$lFileCompare" ] ; then
++                      lOutputFile=${lFileCrypted:-$lFilePacked}
++                      if [ -e "$lOutputFile" ] ; then
+                         lBackupFileCreation="skip"
+ 
+                         if [ "$lPackMode" == "collect" ] ; then
+@@ -1716,23 +1727,14 @@
+                                     echo
+                                     log "Date of file '$lNewerFile' in the future." $LOG_ERROR
+                                 fi
+-                                if [ "$lNewerFile" -nt "$lFileCompare" -o ! -e "$lNewerFile" ] ; then
+-                                # update only possible without encryption (zip file available)
+-                                    if [ -z "$lFileCrypted" ] ; then
+-                                        lBackupFileCreation="update"
+-                                    else
+-                                        lBackupFileCreation="create"
+-                                    fi
++                                if [ "$lNewerFile" -nt "$lOutputFile" -o ! -e "$lNewerFile" ] ; then
++                                    lBackupFileCreation="create"
+                                     break
+                                 fi
+                             done < "$lFileListTmpFName"
+                         else
+-                            if [ "$lFile" -nt "$lFileCompare" -o ! -e "$lFile" ] ; then
+-                                if [ -z "$lFileCrypted" ] ; then
+-                                    lBackupFileCreation="update"
+-                                else
+-                                    lBackupFileCreation="create"
+-                                fi
++                            if [ "$lFile" -nt "$lOutputFile" -o ! -e "$lFile" ] ; then
++                                lBackupFileCreation="create"
+                             fi
+                         fi
+                       else
+@@ -1754,8 +1756,7 @@
+                         show_progress "$PROGRESS_LINE+"
+                     else
+                         show_progress "$PROGRESS_LINE."
+-                        lLocalOutputSize=$(( $lLocalOutputSize + ( $(stat -c "%s" "$lFileCompare") + 512 ) / 1024 ))
+-                        lOutputFile="$lFileCompare"
++                        lLocalOutputSize=$(( $lLocalOutputSize + ( $(stat -c "%s" "$lOutputFile") + 512 ) / 1024 ))
+                     fi
+                     lLocalOutputCount=$(( $lLocalOutputCount + 1 ))
+                     echo $lLocalOutputSize > "$lFileListTmpFName.outputsize"
+

@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# save symlinks from deletion
+#[ -e /var/backups/isibackup ] || 
+if [ -e  /var/backups/isibackup ]; then
+    echo "/var/backups/isibackup already exit."
+else
+    mkdir -p /var/backups/isibackup
+fi
+

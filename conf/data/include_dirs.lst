@@ -1,0 +1,21 @@
+# list of directories to be included in backup
+#
+# please be aware that these are shell patterns, not egrep patterns! 
+# they will be used as input for the find command
+# default (if no line here): no directory included!
+# do escape all spaces with a backslah
+# do not use expansions and spaces on the same line
+# links are stored as links and are not followed, so if you include /var here, and it points to /usr/var, that is not being backuped! 
+# you would have to include /usr/var then instead of /var. the same is true for the exclude lists.
+#
+# if you include something here, be sure to exclude it in the system backup
+#
+# data should be in very few places:
+/home*
+/root
+/var/home*
+/var/lib/cvs
+# /var/lib/mysql is now done with BACKUP_PRE_CMDS
+# /var/lib/postgresql is also done with BACKUP_PRE_CMDS
+/var/local/share
+/var/log/mysql

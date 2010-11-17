@@ -1,0 +1,207 @@
+#!/usr/bin/ruby
+
+$LOAD_PATH.insert(0,File.dirname(__FILE__) + "/lib/")
+require 'libisi'
+init_libisi
+require 'backup'
+
+hostfile = nil
+ENV["BACKUP_ROOT"] ||= Pathname.new("/var/backups/isibackup")
+$new_root = "."
+action = :list
+keys = [:host_name]
+
+$sets = ["data","config","system"]
+$modes = ["full","diff","incr"]
+$verbose = false
+$date = false
+
+hosts = optparse {|o|
+  o.on( "-f","--file FILENAME", "Display backups of hosts in this file.") do |e|
+    hostfile = e
+  end 
+
+  o.on( "--root DIR", "Isibackup root directory (Default is '#{ENV["BACKUP_ROOT"]}').") do |e|
+    ENV["BACKUP_ROOT"] = e
+  end 
+
+  o.on( "--new_root DIR", "The backup root to copy the files to (Default is '#{$new_root}').") do |e|
+    $new_root = e
+  end 
+
+  o.on( "-s", "--sets SETPATTERN", "Do only consider these sets (glob pattern, default '#{$sets.inspect}').") do |e|
+    $sets = e
+  end 
+
+  o.on( "-m", "--mode MODENAME", "Do only consider the following mode (diff, incr or full).") do |e|
+    $modes = [e]
+  end
+
+  o.on( "-k", "--keys KEY,KEY,KEY", "Keys to make sum over (e.g. host,date will display vlumes per host and date.) Values: host_name,date,set,mode,domain") do |e|
+    keys = e.split(",").map{|k| k.to_sym}
+  end
+
+  o.on( "--move", "Move backup files to new_root.") do |e|
+    action = :move
+  end
+
+  o.on( "--copy", "Copy backup files to new_root.") do |e|
+    action =  :copy
+  end
+
+  o.on( "--clean", "List directories to delete.") do |e|
+    action = :clean
+  end
+
+  o.on( "-d", "--delete", "Delete specified backup files.") do |e|
+    action = :delete
+  end
+}
+
+hosts = ARGV  
+if hostfile
+  throw "Arguments and hostfile are not allwoed together." if hosts.length > 0
+  hosts = open(hostfile).readlines 
+end
+hosts = hosts.map{|h|h.strip}.reject{|h|h=~/^\#.*/}
+
+
+def directories_per_keys(keys, hosts = [])
+  def make_key(dir, keys)
+    keys.map{|k| dir[k]}.join(" ")
+  end
+
+  dirs = Backup.glob_directories(hosts, $modes, $sets)
+  ret = {}
+  dirs.map{|d| make_key(d,keys) }.uniq.each {|key|
+    ret[key] = dirs.select{|d| make_key(d,keys) == key}.map{|d| d[:dir]}
+  }
+  ret
+end
+
+def directories_per_host(hosts = [])
+  directories_per_keys([:host_name,:date],hosts)
+end
+
+def directories_perdd_host(hosts = [])
+  dirs = Backup.glob_directories(hosts, $modes, $sets)
+  ret = {}
+  dirs.map{|d| d[:host_name]}.uniq.each {|host|
+    ret[host] = dirs.select{|d| d[:host_name] == host}.map{|d| d[:dir]}
+  }
+  ret
+end
+
+def du(dir)
+  $log.debug{"Going to measure size of dir '#{dir}'."}
+  cmd = "|du --max-depth=0 #{dir}"
+  if open(cmd) {|f| f.readlines.join =~/^(\d\d*)\t.*\n$/ }
+    $log.debug{"Dir dir '#{dir}' has size #{$1.to_i}."}
+    $1.to_i
+  else
+    $log.error{ "'#{cmd}' failed to return usable format."}
+    $log.debug{open(cmd).readlines.join}
+    throw "du for path '#{dir}' failed."
+  end
+end
+
+def sizes_per_keys(keys, hosts = [])
+  h = {}
+  directories_per_keys(keys,hosts).sort.each {|key,dirs|
+    h[key] = dirs.inject({:all=>0,:data=>0,:system=>0,:config=>0}){|val,dir|
+      size = du(dir.to_s)
+      val[:all] += size
+      d = dir.sub(Backup.root,"")
+      val[:data] += size if d =~ /^\/?data/
+      val[:config] += size if d =~ /^\/?config/
+      val[:system] += size if d =~ /^\/?system/
+      val
+    }
+    $log.info("#{key.ljust(15)}: #{format_sizes(h[key])}.")
+  }
+  h
+end
+
+def format_sizes(s)
+  "#{s[:all].to_s.rjust(10)} (system: #{s[:system].to_s.rjust(10)} data: #{s[:data].to_s.rjust(10)} config: #{s[:config].to_s.rjust(10)})"
+end
+
+case action
+when :list
+  s = sizes_per_keys(keys, hosts)
+  s.sort.each { |key,size|
+    print "#{key.ljust(15)}: #{format_sizes(size)}\n"
+  }
+  
+  total = s.values.inject({:all=>0,:data=>0,:system=>0,:config=>0}) { |sum,val| 
+    sum.keys.each{|key|
+      sum[key] += val[key]
+    }
+    sum
+  }
+  print ("-"*84) + "\n"
+  print "Total          : #{format_sizes(total)}\n"
+when :delete
+  dph = directories_per_host(hosts)
+  $log.info("Going to delete the follwing directories recursive:")
+  dph.each {|host,dirs|
+    dirs.each { |dir|
+      $log.info(dir.to_s)
+    }
+  }
+  print "Really delete? (CTRL-C to abort)"
+  STDIN.readline
+  dph.each {|host,dirs|
+    dirs.each { |dir|
+      $log.info("Removing '#{dir}'...")
+      FileUtils.rm_r dir, :verbose => $verbose
+    }
+  }
+
+when :move,:copy
+  throw "Target root does not exists or is not a directory!" unless Pathname.new($new_root).directory?
+
+  def target(dir)
+    dir.sub($root,$new_root)
+  end
+
+  $log.debug("Checking that target directories do not exists.")
+  directories_per_host(hosts).each {|host,dirs|
+    dirs.each { |dir|
+      $log.debug("Checking directoriy '#{target(dir)}'.")
+      if Pathname.new(target(dir)).directory?
+	$log.error("Target directory '#{target(dir)}' already exists!") 
+	exit 1
+      end
+    }
+  }
+
+  directories_per_host(hosts).each {|host,dirs|
+
+    dirs.each { |dir|
+      $log.info("Going to #{action} directory '#{dir.to_s}'.")
+      t = Pathname.new(target(dir))
+      $log.info("Creating parent path '#{t.parent.to_s}'.")
+      t.parent.mkpath
+      $log.info("#{action} directory '#{dir.to_s}' to '#{t.to_s}'.")
+      FileUtils.move dir, target(dir), :verbose => $verbose if action == :move
+      FileUtils.cp_r dir, target(dir), :verbose => $verbose if action == :copy
+    }
+
+  }
+when :clean
+  glob1 = "#{$root}/{#{$sets.join(",")}}/full/*"
+  glob2 = "#{$root}/{#{$sets.join(",")}}/diff/*/*"
+  glob3 = "#{$root}/{#{$sets.join(",")}}/diff/*"
+
+  print "#find #{glob1}  -maxdepth 1 -empty -type d\n"
+  system "find #{glob1}  -maxdepth 1 -empty -type d"
+  print "#find #{glob2}  -maxdepth 1 -empty -type d\n"
+  system "find #{glob2}  -maxdepth 1 -empty -type d"
+  print "#find #{glob3}  -maxdepth 1 -empty -type d\n"
+  system "find #{glob3}  -maxdepth 1 -empty -type d"
+else
+  throw "Unknown action '#{action}'."
+end
+
+# find {data,system,config}/diff/*/*  -maxdepth 1 -empty -type d

@@ -1,0 +1,107 @@
+#!/bin/bash
+# Copyright 2004-2007 IMSEC GmbH
+#
+# This file is part of ISiBackup.
+#
+#    ISiBackup is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    ISiBackup is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with ISiBackup; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+# delete old backups
+# part of isibackup
+
+PROGRAM_IDENT="deleteoldbackups"
+PROGRAM_VERSION="1.5.0~devel"
+COPYRIGHT="Copyright (C) 1999-2007 IMSEC GmbH"
+LIABILITY="This program comes with NO WARRANTY, to the extent permitted by law."
+AUTHORS="Written by Marcus Holthaus and Simon Huerlimann."
+
+PATH_LIB="/usr/lib/libisi"
+source "$PATH_LIB/lib_help.sh"
+
+PATH_CONF=/etc/isibackup
+ISIBACKUP_CONF=isibackup.conf
+
+lDelay=0
+
+init_program () { 
+  source "${PATH_CONF}/${ISIBACKUP_CONF}"
+}
+
+deletebackupfiles () {
+  lFileHost="$1"
+  lUser="$2"
+  lBackupHost="$3"
+  echo "Deleting Backups on Host ${lBackupHost}:"
+  ssh ${lUser}@${lBackupHost} "df ${BACKUP_ROOT} | tail -1"
+  sleep $lDelay
+  for lPattern in $lPattern; do 
+    echo "Deleting Backups for Host ${lHost} on Host ${lBackupHost} conforming to pattern $lPattern:"
+    # do not apply netname, as the backup name and the net name need not be equal
+    lNetName=$(echo ${lBackupHost} | cut -f 2- -d '.')
+    lBackupHostName=$(echo ${lBackupHost} | cut -f 1 -d '.')
+    ssh ${lUser}@${lBackupHost} "rm -rvf ${BACKUP_ROOT}*/diff/*/${lPattern}*/${lBackupHostName}"
+    ssh ${lUser}@${lBackupHost} "rm -rvf ${BACKUP_ROOT}*/diff/${lPattern}*/${lBackupHostName}"
+    ssh ${lUser}@${lBackupHost} "df ${BACKUP_ROOT} | tail -1"
+    sleep $lDelay
+  done
+}
+
+do_delete () {
+  for lHost in $(cat "${BACKED_UP_HOSTS}" | grep -v "^#" | grep -v "^$") ; do 
+    echo $lHost
+    deletebackupfiles "$lHost" "${BACKED_UP_HOST_USER}" "${lHost}"
+    deletebackupfiles "$lHost" "${BACKUP_HOST_USER}" "${BACKUP_HOST}"
+  done
+
+  for lHost in $(cat "${BACKED_UP_HOSTS}" | grep -v "^#" | grep -v "^$") ; do 
+    echo $lHost
+    deletebackuphostfiles "$lHost"
+  done
+}
+
+function do_help () {
+    echo "'$PROGRAM_IDENT' deletes differential backups from the local host and the backup host"
+    echo 
+    echo "Usage: $PROGRAM_IDENT [OPTIONS].."
+    echo 
+    do_help_common_commands
+    echo "      -p      --pattern <pattern>  delete all differential backups conforming to pattern"
+    echo 
+    do_help_common_options
+    echo
+    echo "Report bugs to bug-$PROGRAM_IDENT@imsec.ch"
+
+}
+
+lCmd="HELP"
+
+lArgs=$(getopt -o hpvVw -l debug,help,pattern,verbose,version -n "$PROGRAM_IDENT" -- $*)
+eval set -- ${lArgs}
+
+while true ; do
+    case "$1" in
+        -h|--help) lCmd="HELP"; shift ;;
+        -p|--pattern) lCmd="DELETE"; lPattern="$2"; shift 2;;
+        -v|--verbose) LOG_LEVEL=$LOG_VERBOSE; shift ;;
+	-V|--version) lCmd="VERSION"; shift ;;
+	-w|--debug) LOG_LEVEL=$LOG_ALL;  shift ;;
+        --) shift ; break ;;
+	*)  echo "[ERROR] the commandline parsing failed!";  echo "'$@'";  exit 1 ;;
+    esac
+done
+case $lCmd in
+	DELETE)		init_program; do_delete ;;
+	HELP)		do_help ;;
+	VERSION)	do_version ;;
+esac

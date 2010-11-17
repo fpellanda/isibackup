@@ -1,0 +1,16 @@
+ISiBackup
+---------
+
+The source code and unofficial Debian packages are available at 
+ http://www.isibackup.org/
+The Debian package is maintained by Adrian Friedli <adrian.friedli@logintas.ch>
+
+Upstream Authors are
+ Marcus Holthaus <marcus.holthaus@imsec.ch> and
+ Simon Huerlimann <simon.huerlimann@imsec.ch>
+
+This software is copyright (c) 1999-2007 by IMSEC GmbH, Cham, Switzerland.
+
+You are free to distribute this software under the terms of the GNU General 
+Public License. On Debian systems, the complete text of the GNU General
+Public License can be found in the file '/usr/share/common-licenses/GPL'.

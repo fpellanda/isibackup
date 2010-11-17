@@ -1,0 +1,334 @@
+#!/usr/bin/ruby
+require 'optparse'
+require 'date'
+
+$LOAD_PATH.insert(0,File.dirname(__FILE__) + "/lib/")
+require 'libisi'
+old_env = save_env
+init_libisi(:ui => "console")
+
+$action = :backup
+$dryrun = false
+$force_full = false
+$append_options = ""
+$set_only = nil
+optparse {|o|
+  o.on("-s", "--set SETNAME","Name of the state control directory.") do |name|
+    $set_only = name
+  end
+
+  o.on("--isibackup-binary FILENAME","The binary isibackup file to use.") do |name|
+    ISIBACKUP_BINARY = name
+  end
+
+  o.on("--deleteoldbackups-binary FILENAME","The binary deleteoldbackups file to use.") do |name|
+    DELETEOLDBACKUPS_BINARY = name
+  end
+
+  o.on("--force-full","Force full backup for all backups.") do $force_full = true end
+  o.on("--append-options OPTIONS","Append these options to the isibackup command.") do |$append_options|
+    $append_options += " "
+  end
+
+  o.on("--dryrun","Do not execute anything.") do $dryrun = true end
+  o.on("-l","--list","Lists the configuration of the control file.") do $action = :list end
+
+  o.on("-c","--check","Check what should be done.") do $action = :check end
+  o.on("-s","--silent","DEPRECATED use --quiet") do 
+    $log.warn("--silent is deprecated, use --quiet instead")
+  end
+}
+
+require "backup"
+
+# File to store processid
+PID_FILE = "/var/run/isibackup#{$set_only}"
+
+Backup.load_defaults
+Backup.load_config
+# Backup root
+#BACKUP_ROOT = ENV["BACKUP_ROOT"] if ENV["BACKUP_ROOT"] and not defined?(BACKUP_ROOT)
+#BACKUP_ROOT = "/var/backups/isibackup" unless defined?(BACKUP_ROOT)
+
+# Hostname
+#HOSTNAME = open("|hostname -f"){|f| f.readline}.strip unless defined?(HOSTNAME)
+
+# Isibackup
+ISIBACKUP_BINARY = "/usr/bin/nice /usr/bin/isibackup-main"  unless defined?(ISIBACKUP_BINARY)
+DELETEOLDBACKUPS_BINARY = "/usr/bin/deleteoldbackups"
+
+# Mode priorities
+# If no backup exist or two backup
+# should be done at the same time
+# the first called will be done
+# No two backups will be done on the same day
+MODE_PRIORITY = [:full, :diff, :incr]
+
+# Possible intervals
+#  * Monthly on day n
+#  * Every n-th day
+def parse_interval(str)
+  case str
+  when "0"
+    [:never]
+  when /^\*(\/(\d+))?$/
+    [:daily, ($2 or 1).to_i]
+  when /^(\d+)$/
+    [:monthly, $1.to_i]
+  else
+    raise "Unknown interval '#{str}'."
+  end
+end
+def interval_human_readable(interval)
+  case interval[0]
+  when :daily
+    if interval[1] == 1
+      "Every day."
+    else
+      "#{interval[1]} days after the last backup."
+    end
+  when :monthly
+    "On day number #{interval[1]} every month."
+  when :never
+    "Never do a backup."
+  else
+    p interval
+  end
+end
+
+# State inforation is stored here:
+STATE_DIR="/var/lib/isibackup/" unless defined?(STATE_DIR)
+def state_file(set,mode); "#{STATE_DIR}/#{set}/#{mode}"; end
+# Possible states: 
+#   * "started: DATE"
+#   * "finished: DATE"
+#   * "error: DATE"
+def state(set, mode); 
+  line = open(state_file(set,mode),"r") {|f| f.readline }
+  raise "Unexpected state in state file '#{state_file(set,mode)}': #{line}" unless 
+    line =~ /^(started|finished|error)\: (\d\d\d\d-\d\d-\d\d)$/
+  return [$1.to_sym, DateTime.parse($2)]
+end
+
+
+def last_successful_backup(set, mode)
+  raise "Unexpected hostname #{full_qualified_domainname}" unless full_qualified_domainname =~ /^([^\.]+)\.(.*)$/
+  backup = Backup.new(set)
+
+  runs = backup.get_latest_completed_runs
+  # if the first run (full) hast not proper
+  # version, return nil
+  return false if runs.nil?
+  return false if runs[0].nil?
+  unless runs[0][:program_version] =~ /^2\./
+    $log.warn("Ignoring backup with old isibackup version '#{runs[0][:program_version]}'")
+    return false
+  end
+  runs = runs.select {|r| r[:mode].to_s == mode.to_s}
+  log_date = (runs[-1] and Date.parse(runs[-1][:finish_time]))
+  
+  state_file = "#{Backup.get_config("BACKUP_ROOT")}/state/#{full_qualified_domainname}-#{set}-#{mode}.date"
+  return false unless File.exist?(state_file)
+  begin
+    date_log_date = Date.parse(open("#{state_file}","r") {|f| f.readline })  
+  rescue EOFError
+    return false
+  end
+
+  return date_log_date unless log_date
+
+  if (log_date.strftime("%F") != date_log_date.strftime("%F"))
+    $log.warn("Logfile #{log_date.strftime("%F")} and stampfile date #{date_log_date.strftime("%F")} mismatch!")
+    $log.warn("Return earlier")
+    return [log_date,date_log_date].min
+  end
+  return date_log_date
+end
+
+def next_backup_date(set, mode)
+  interval = Backup.control[set][mode]
+  last_full_backup = last_successful_backup(set,:full)
+  
+  last_mode_backup = last_successful_backup(set,mode)
+
+  last_backup = if last_full_backup and last_mode_backup and last_mode_backup > last_full_backup
+		  last_mode_backup
+		else
+		  last_full_backup
+		end
+  
+  case interval[0]
+  when :monthly  
+    this_month = Date.parse("#{Date.today.year}-#{Date.today.month}-#{interval[1]}")
+    if Date.today < this_month
+      # if the backup date is after today
+      # the last backup must at least be done
+      # after one month ago from that date      
+      min_backup = (this_month << 1)
+      next_backup = this_month
+    else
+      # if the backup date is today or before
+      # today, the backup date may not be before
+      # that date      
+      min_backup = this_month
+      next_backup = (this_month >> 1)
+    end
+
+    if !last_backup or (min_backup > last_backup)
+      min_backup
+    else
+      next_backup
+    end      
+    
+  when :daily    
+    unless last_backup
+      Date.today 
+    else
+      last_backup + interval[1]
+    end
+  when :never
+    false
+  else
+    raise "Unknown interval '#{req.inspect}'."
+  end
+end
+
+def next_backup(set)
+  min = nil
+  dates = MODE_PRIORITY.map {|mode|
+    date = next_backup_date(set, mode)
+    return [mode,date] if date and date <= Date.today
+    if date and (min.nil? or (min[1] > date))
+      min = [mode,date]
+    end
+    [mode, date]
+  }
+  min
+end
+
+control_entries = Backup.control
+if $set_only
+  old_control_entries = control_entries
+  control_entries = {}
+  if $set_only == "media"
+    old_control_entries.each {|key, val|
+      control_entries[key] = val if key.to_s =~ /^media/
+    }
+  else
+    old_control_entries.each {|key, val|
+      control_entries[key] = val if key.to_s == $set_only
+    }
+  end
+  raise "Backup set #{$set_only} not found" if control_entries.length == 0
+end
+
+case $action
+when :list
+  control_entries.each {|set,intervals|
+    print "Configuration for set '#{set}':\n"
+    MODE_PRIORITY.each {|mode| interval = intervals[mode]
+      print "  #{mode}: #{interval_human_readable(interval)}\n"
+    }
+  }
+when :check
+  backup_needed = false
+  width = control_entries.keys.map {|k| k.to_s.length}.max
+
+  control_entries.each {|set,intervals|
+    if $log.info?
+      print "Checking set '#{set}':\n" 
+    else
+      print "#{set.to_s.ljust(width)}: " 
+    end
+    MODE_PRIORITY.each {|mode| interval = intervals[mode]
+      if interval[0] != :never and $log.info?
+	print "  #{mode}: "
+	print "Current '#{last_successful_backup(set,mode)}', "
+	print "Next '#{next_backup_date(set,mode)}' "
+	print "(#{interval_human_readable(interval)})\n"
+      end
+    }
+    nb = next_backup(set)
+    
+    diff = nb[1] - Date.today
+    if diff > 0
+      print $ui.colorize(:green) {"OK, Will do #{nb[0]} backup in #{diff} days (on #{nb[1].to_s})." } + "\n"
+    end
+    if diff < 0
+      backup_needed = true
+      print $ui.colorize(:red) {"LATE, #{nb[0].to_s.capitalize} backup should have be done already since #{-diff} days ago (on #{nb[1].to_s})." } + "\n"
+    end
+    if diff == 0
+      backup_needed = true
+      print $ui.colorize(:yellow) {"TODAY, Will do #{nb[0]} backup today (on #{nb[1].to_s})." } + "\n"
+    end
+  }  
+  exit 99 if backup_needed
+when :backup
+  # here we really change things.
+  # check if isibackup is already
+  # running and kreate pid file
+  if File.exist?(PID_FILE)
+    pid = open(PID_FILE,"r"){|f| f.readline.strip.to_i}
+    if system("/bin/ps #{pid} > /dev/null")
+      $ui.warn("Isibackup already running (pid:#{pid}).\n") unless !$log.warn?
+      exit 0
+    else
+      # process not running anymore
+      File.delete(PID_FILE)
+      #print "Remove PID\n"
+    end  
+  end
+  open(PID_FILE,"w") {|f| f.write(Process.pid.to_s)}
+
+  def info(msg)
+    unless !$log.warn?
+      print msg
+      STDOUT.flush 
+    end
+  end
+  
+  error_ocurred = false
+  width = control_entries.keys.map {|k| k.to_s.length}.max
+  
+  control_entries.each {|set,intervals|
+    info "#{set.to_s.capitalize.ljust(width)}:"
+    mode, date = next_backup(set)
+    if date <= Date.today or $force_full    
+      mode = :full if $force_full
+      cmds = ["#{ISIBACKUP_BINARY} --#{mode} --backup --set #{set} #{$append_options}" + if  !$log.warn? then "> /dev/null" else "--progress" end]
+      if mode == :full
+	cmds.push("#{DELETEOLDBACKUPS_BINARY} -i -f " + if !$log.warn? then "> /dev/null" else "" end)
+	cmds.push("#{DELETEOLDBACKUPS_BINARY} -d -f " + if !$log.warn? then "> /dev/null" else "" end) 
+      else
+	cmds.push("#{DELETEOLDBACKUPS_BINARY} -#{mode.to_s[0..0]} -f " + if !$log.warn? then "> /dev/null" else "" end) 
+      end
+      info " doing #{mode}...\n"
+      
+      cmds.each {|cmd|
+	info "  #{Time.now.strftime("%F %T")} EXECUTE: #{cmd}\n"
+	unless $dryrun
+	  if load_env(old_env) {system(cmd)}
+	    info "  #{Time.now.strftime("%F %T")} SUCCESS!\n"
+	  else
+	    STDERR.write("ERROR: exit value '#{$?.exitstatus}'. Executed command was: #{cmd.inspect}\n")
+	    error_ocurred = true
+	    break
+	  end
+	end
+      }
+
+      print "..." unless !$log.warn?
+      info " done\n"
+    else
+      info " OK\n"
+    end    
+  }
+  
+  File.delete(PID_FILE)
+  exit 1 if error_ocurred
+else
+  raise "\nNOT IMPLEMENTED ACTION #{$action}\n\n"
+end
+exit 0
+

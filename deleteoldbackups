@@ -1,0 +1,70 @@
+#!/usr/bin/ruby
+$LOAD_PATH.insert(0,File.dirname(__FILE__) + "/lib/")
+require 'libisi'
+init_libisi
+require 'backup'
+
+ENV["BACKUP_ROOT"] ||= Pathname.new("/var/backups/isibackup")
+
+$mode = nil
+$force = false
+
+args = optparse {|o|
+  o.on("-i","--incr","Delete old incr backups") do |name|
+    $mode = :incr
+  end  
+  o.on("-d","--diff","Delete old diff backups") do |name|
+    $mode = :diff
+  end  
+
+  o.on("--force","Do really remove the files") do
+    $force = true
+  end    
+}
+
+if $mode.nil?
+  print "No mode specified.\n" 
+  exit 1
+end
+print "No force option set, list only, not deleting files.\n" unless $force
+
+
+Backup.glob_directories(nil,[$mode.to_s]).group_by {|vals|
+  [vals[:host_name], vals[:domain],vals[:set]]
+}.each {|options, backups|
+  $log.debug{"Processing #{options}"}
+  options = {
+    :host_name => options[0],
+    :domain => options[1],
+    :set => options[2]   
+  }
+  b = Backup.new(options[:set], options)
+  
+  begin
+    stamp_file = b.stamp_file("full")
+    $log.debug("Stamp file is #{stamp_file}")
+    raise "Stamp file does not exist #{stamp_file}" unless stamp_file.exist?
+    last_full = DateTime.parse(stamp_file.readlines[0].strip)  
+    raise "No full stamp found for #{options.inspect}" unless last_full
+  rescue
+    $log.warn("Unable to find last successful run of #{options.inspect}: #{$!}")
+    next
+  end
+
+  $log.info("Last successfull full of #{options.inspect}: #{last_full.strftime("%F")}")
+  # remove all backups that are before that date
+  backups.each {|b|
+    next if b[:mode] == "full"
+
+    raise "Selected backup that has not mode #{$mode}" if b[:mode] =! $mode
+    if DateTime.parse(b[:date]) < last_full
+      $log.info("incr date #{DateTime.parse(b[:date]).strftime("%F")} before full date #{last_full.strftime("%F")}")
+      if $force
+	$log.warn("Removing #{b[:dir]}")
+	FileUtils.rm_rf(b[:dir])
+      else
+	print "Would remove: #{b[:dir]}\n"
+      end
+    end    
+  }
+}

@@ -1,0 +1,19 @@
+#!/bin/bash
+# upload documentation to webserver
+# marcus holthaus 2004-02-13
+lUploadRepository=/home/$LOGNAME/data/imsec/sites/www.isibackup.org/docs/documentation/isibackup
+#### copy documentation
+lCurDir=$PWD
+if [ ! -w $lUploadRepository ] ; then
+	echo "$lUploadRepository nicht gefunden"
+	exit 1
+fi
+
+cd $lUploadRepository
+for i in $lCurDir/docs/html/* ; do
+  cp -dpvR $i .
+#  cvs add "$(basename $i)"
+done
+cvs add *
+
+cvs commit -m 'auto generated html documentation'

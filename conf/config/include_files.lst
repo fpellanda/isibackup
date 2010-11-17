@@ -1,0 +1,5 @@
+# list of files to be included in backup
+# (whoami) 2010-10-20: adapted to set "set" for backup up host "hostname" running on host "hostname"
+#
+# please be aware that these are shell patterns, not egrep patterns!
+# default (if no line here): all files included

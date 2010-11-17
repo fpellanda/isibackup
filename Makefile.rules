@@ -1,0 +1,6 @@
+PREFIX=/usr
+
+MKDIR = /bin/mkdir -p
+INSTALL = /usr/bin/install
+INSTALL_bin = $(INSTALL) -m 755
+INSTALL_data = $(INSTALL) -m 644

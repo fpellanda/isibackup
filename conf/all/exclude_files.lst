@@ -1,0 +1,6 @@
+# list of files to be excluded from backup
+#
+# please be aware that these are egrep patterns, not shell patterns!
+# default (if no line here): no file excluded
+# do not backup kernel source distributions
+#

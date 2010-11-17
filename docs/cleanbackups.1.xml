@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.1.2//EN"
+                   "http://www.oasis-open.org/docbook/xml/4.1.2/docbookx.dtd">
+<refentry id='cleanbackups'>
+
+<refmeta>
+<refentrytitle>cleanbackups</refentrytitle>
+<manvolnum>1</manvolnum>
+</refmeta>
+
+<refnamediv id='name'>
+<refname>cleanbackups</refname>
+<refpurpose>frees diskspace by deleting unused diff backups</refpurpose>
+</refnamediv>
+
+<refsynopsisdiv id='synopsis'>
+<cmdsynopsis>
+  <command>deleteolddiffbackups</command>
+  <arg choice='opt'>-s</arg>
+  <arg choice='opt'>-m</arg>
+  <arg choice='opt'>-v</arg>
+</cmdsynopsis>
+</refsynopsisdiv>
+
+<refsect1 id='description'><title>Description</title>
+<para>
+<application>ISiBackup</application> makes backup easy.
+</para>
+<para>
+<command>cleanbackups</command> removes old diff backups until only a given percentage of disk space is used.
+</para>
+</refsect1>
+
+<refsect1 id='author'><title>Authors</title>
+<para>
+Written by
+<author><firstname>Marcus</firstname><surname>Holthaus</surname></author>,
+<author><firstname>Simon</firstname><surname>Huerlimann</surname></author> and
+<author><firstname>Adrian</firstname><surname>Friedli</surname></author>.
+</para>
+</refsect1>
+
+<refsect1 id='options'><title>Options</title>
+<variablelist>
+  <varlistentry>
+  <term><option>-s</option></term>
+  <listitem>
+    <para>used disk space in percend that is tried to reach</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-m</option></term>
+  <listitem>
+    <para>keep at minimum so many diff backups</para>
+  </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term><option>-v</option></term>
+  <listitem>
+    <para>give more information</para>
+  </listitem>
+  </varlistentry>
+</variablelist>
+</refsect1>
+
+<refsect1 id='files'><title>Files</title>
+<simplelist>
+<member><filename>/etc/isibackup/isibackup.conf</filename></member>
+<member><filename>/etc/isibackup/defaults.conf</filename></member>
+<member><filename>/etc/isibackup/<replaceable>set</replaceable>/set.conf</filename></member>
+<member><filename>/etc/isibackup/<replaceable>set</replaceable>/include_files.lst</filename></member>
+<member><filename>/etc/isibackup/<replaceable>set</replaceable>/exclude_files.lst</filename></member>
+<member><filename>/etc/isibackup/<replaceable>set</replaceable>/include_dirs.lst</filename></member>
+<member><filename>/etc/isibackup/<replaceable>set</replaceable>/exclude_dirs.lst</filename></member>
+</simplelist>
+</refsect1>
+
+<refsect1 id='seealso'><title>See Also</title>
+<simplelist type="inline">
+<!--<member><command>cleanbackups</command>(1)</member>-->
+<member><command>deleteolddiffbackups</command>(1)</member>
+<member><command>deleteoldincrbackups</command>(1)</member>
+<member><command>isibackup</command>(1)</member>
+<member><command>isibus</command>(1)</member>
+<member><command>isirestore</command>(1)</member>
+</simplelist>
+</refsect1>
+
+<refsect1 id='reportingbugs'><title>Reporting Bugs</title>
+<para>
+Report bugs to <email>bugs@isibackup.org</email>.
+</para>
+</refsect1>
+
+<refsect1 id='copyright'><title>Copyright</title>
+<simplelist>
+<member>Copyright &copy; 1999-2007 IMSEC GmbH</member>
+<member>Copyright &copy; 2004-2007 Logintas AG</member>
+</simplelist>
+<para>
+This program comes with NO WARRANTY, to the extent permitted by law.
+</para>
+</refsect1>
+
+</refentry>
+

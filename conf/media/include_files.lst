@@ -1,0 +1,8 @@
+# list of files to be included in backup
+#
+# please be aware that these are shell patterns, not egrep patterns!
+# they will be used as input to the find command
+# default (if no line here): all files included
+#
+# as a default, we inlcude all files, even backup, temporary and compressed files
+

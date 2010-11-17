@@ -1,0 +1,30 @@
+# list of directories to be excluded from backup
+#
+# please be aware that these are egrep patterns, not shell patterns!
+# default (if no line here): no directory excluded
+#
+/mnt/win/_RESTORE
+/mnt/win/CDROM
+/mnt/win/CD_ROM
+/mnt/win/CD-ROM
+/mnt/win/CDR
+/mnt/win/CD_R
+/mnt/win/CD-R
+/mnt/win/data.2nd
+/mnt/win/Data.2nd
+/mnt/win/TWIXTEL
+/mnt/win/Recycled
+/mnt/win/backup
+/mnt/win/Backup
+/mnt/win/support
+/mnt/win/Support
+/mnt/win/swcoll
+/mnt/win/temp
+/mnt/win/Temp
+/mnt/win/tmp
+/mnt/win/Tmp
+/mnt/win/TMP
+
+/mnt/win/.*/Temp/
+/mnt/win/.*/Temp$
+/mnt/win/.*/Temporary\ Internet\ Files
