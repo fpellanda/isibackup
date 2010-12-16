@@ -1,3 +1,13 @@
+isibackup (2.0.33) all; urgency=low
+
+  * New release
+  * test
+  * Added notice for using bash not dash
+  * Removed backup file
+  * first commit
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Thu, 16 Dec 2010 19:14:28 +0100
+
 isibackup (2.0.32) unstable; urgency=low
 
   * New release
