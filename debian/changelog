@@ -1,3 +1,10 @@
+isibackup (2.0.34) all; urgency=low
+
+  * New release
+  * Added debug logs and fixed mount_points mechanism
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Fri, 14 Jan 2011 14:19:47 +0100
+
 isibackup (2.0.33) all; urgency=low
 
   * New release
