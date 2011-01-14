@@ -1,3 +1,10 @@
+isibackup (2.0.35) all; urgency=low
+
+  * New release
+  * Removed unwanted exit 0
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Fri, 14 Jan 2011 14:36:08 +0100
+
 isibackup (2.0.34) all; urgency=low
 
   * New release
