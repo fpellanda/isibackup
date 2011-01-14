@@ -51,6 +51,7 @@ ENV["lDirListFName"] = "#{ENV["HOST"]}.#{ENV["NET"]}.#{ENV["PROGRAM_IDENT"]}.dir
 ENV["lDiffRefFName"] = "#{ENV["HOST"]}.#{ENV["NET"]}.#{ENV["PROGRAM_IDENT"]}.diffref.#{Process.pid}"
 
 def check_config
+  $log.debug("Checking configuration")
   raise "No hostname found." unless Backup.get_config("HOST")
   raise "No netname found." unless Backup.get_config("NET")
 
@@ -65,6 +66,8 @@ def check_config
   $max_collect_size = Backup.get_config("MAX_COLLECT_SIZE","0")
   raise "MAX_COLLECT_SIZE not defined!" if $max_collect_size.nil? or $max_collect_size == ""
   $max_collect_size = $max_collect_size.to_i
+  $log.debug("max_collect_size: #{$max_collect_size}")
+
 
   $group_steps = [GROUP_SMALLEST]
   while (next_step = ($group_steps[-1] * GROUP_STEP_MUL)) 
@@ -72,7 +75,7 @@ def check_config
     break if (next_step * GROUP_BASE_SIZE) > $max_collect_size
   end
   $group_counts = $group_steps.map {|s| group_count_function(s) }
-
+  $log.debug("Group steps: #{$group_steps.inspect}, Group counts: #{$group_counts.inspect}")
 
   raise "FILE_NAME_ESCAPE_PATTERN not found." unless Backup.get_config("FILE_NAME_ESCAPE_PATTERN")
   $file_name_escape_pattern = Regexp.new(Backup.get_config("FILE_NAME_ESCAPE_PATTERN"))
@@ -93,17 +96,29 @@ def check_config
 
   # check if mount points are plausible
   mount_points = open("/proc/mounts") {|f| f.readlines}
-  mount_points = mount_points.map {|mp| mp.split(" ")[2]}.select {|mp| mp =~ /^\/dev\// }
-  regexps = "#{Backup.get_config("ISIBACKUP_CONFIGDIR")}/mount_points"
+  mount_points.each {|mp| $log.debug("/proc/mounts: #{mp.inspect}")} if $log.debug?
+
+  mount_points = mount_points.map {|mp| 
+    s = mp.split(" ")
+    next nil unless s[0] =~ /^\/dev\//
+    # return mountpoint
+    s[1]
+  }.compact
+  mount_points.each {|mp| $log.debug("real_mounts: #{mp.inspect}")} if $log.debug?
+  
+  regexp_file = "#{Backup.get_config("ISIBACKUP_CONFIGDIR")}/mount_points"
+  regexps = Pathname.new(regexp_file).readlines.reject {|l| l=~/^ *\#/ or l =~ /^ *$/ }.map {|r|r.strip}
+  regexps.each {|r| $log.debug("mount_point_regexps: #{r}")} if $log.debug?
   regexps = regexps.map {|r| Regexp.new(r.strip)}
-  mount_points = mount_points.reject {|mp| regexps.select {|r| mp =~ r}.length > 0 }
+
+  mount_points = mount_points.reject {|mp| regexps.any? {|r| (mp =~ r)} }
 
   if mount_points.length > 0
     $log.error{"Unusual mount points detected! Will probably not be in backup."}
-    mount_points.each {|mp| $log.error {mp} }
+    mount_points.each {|mp| $log.error {"  " + mp} }
     
     mount_points.each {|mp|
-      Backup.set_config("OPT_EXCLUDE_DIRS",Backup.get_config("OPT_EXCLUDE_DIRS") + "^#{Regexp.escape(mp)}\n")
+      Backup.set_config("OPT_EXCLUDE_DIRS",(Backup.get_config("OPT_EXCLUDE_DIRS") or "") + "^#{Regexp.escape(mp)}\n")
     }
   end
 end
@@ -278,7 +293,6 @@ def init_program
 
   # load configuration from file
   Backup.load_config
-
   # load configuration for the set
   load_set_config
 
@@ -287,7 +301,7 @@ def init_program
   
   #load the rest of the defaults
   load_defaults_postconf
-
+exit 0
   # set trap for normal exit, kill and ctrl-c
   $log.debug{"Adding EXIT trap."}
   Signal.trap("EXIT") { program_exited }

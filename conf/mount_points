@@ -1,3 +1,5 @@
+# All mountpoints metioned here must be in
+# a include if it should be backed up!!
 ^/$
 ^/cdrom
 ^/floppy
