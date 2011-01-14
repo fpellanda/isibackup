@@ -301,7 +301,7 @@ def init_program
   
   #load the rest of the defaults
   load_defaults_postconf
-exit 0
+
   # set trap for normal exit, kill and ctrl-c
   $log.debug{"Adding EXIT trap."}
   Signal.trap("EXIT") { program_exited }
