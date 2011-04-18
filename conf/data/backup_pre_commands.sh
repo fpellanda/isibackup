@@ -23,7 +23,7 @@ function dump_mysql {
     done
     echo "done"
 }
-if [ -d /var/lib/mysql ] ; then
+if [ "$(dpkg -s mysql-server 2>/dev/null| grep '^Status')" = "Status: install ok installed" ] ; then
 
     if [ "$OPT_MYSQL_DUMP_MODE" == "incr" ] ; then
         # check if binlog is enabled
@@ -80,10 +80,9 @@ fi
   ### postgres ###
   ################
 
-if [ -d /var/lib/postgres ] ; then
+if [ "$(dpkg -s postgresql 2>/dev/null| grep '^Status')" = "Status: install ok installed" ] ; then
     echo -n "dumping postgres data ..."
     lPostgresUserName="backup"
-    lPostgresPassword="$(</etc/isibackup/${OPT_SET}/postgres.backup.pw)"
     lPostgresDumpTargetFile="$lTargetDir/postgres.dump.bz2.gpg"
     rm -f "${lPostgresDumpTargetFile}"
     sudo -u postgres pg_dumpall | bzip2 | eval gpg --batch --encrypt $Recipient_Flags > "$lPostgresDumpTargetFile"
