@@ -1,3 +1,12 @@
+isibackup (2.0.36) all; urgency=low
+
+  * New release
+  * Enabled postgresql backup and changed condition for creating mysql
+    and postgresqlbackup (based on installed package and not on existing
+    directory).
+
+ -- Flavio Pellanda (Logintas 2008) <flavio.pellanda@logintas.ch>  Mon, 18 Apr 2011 14:00:04 +0200
+
 isibackup (2.0.35) all; urgency=low
 
   * New release
